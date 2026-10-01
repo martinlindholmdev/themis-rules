@@ -37,7 +37,7 @@ import re
 import subprocess
 import sys
 import tokenize
-from pathlib import Path
+from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Dict, List, Optional, Tuple
 
 SCRIPT_VERSION = "v3"
@@ -314,7 +314,9 @@ def safe_rel_path(root: Path, rel: str) -> Path:
     if any(ord(c) < 0x20 or ord(c) == 0x7f for c in rel):
         raise PathEscapesRepo("a control character is not allowed in a path")
     candidate = Path(rel)
-    if candidate.is_absolute():
+    # rooted under either convention: on Windows "/etc/passwd" has no
+    # drive, so Path.is_absolute() is False, yet root / it escapes the repo
+    if candidate.is_absolute() or PurePosixPath(rel).is_absolute() or PureWindowsPath(rel).anchor:
         raise PathEscapesRepo("%s: an absolute path is not allowed" % rel)
     if ".." in candidate.parts:
         raise PathEscapesRepo("%s: '..' is not allowed" % rel)

@@ -22,7 +22,7 @@ import shlex
 import shutil
 import subprocess
 import sys
-from pathlib import Path
+from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Dict, List, Optional, Set, Tuple
 
 HERE = Path(__file__).resolve().parent
@@ -70,7 +70,9 @@ def safe_path(root: Path, rel: str) -> Path:
     if any(ord(c) < 0x20 or ord(c) == 0x7f for c in rel):
         raise PathEscapesRepo("a control character is not allowed in a path")
     candidate = Path(rel)
-    if candidate.is_absolute():
+    # rooted under either convention: on Windows "/etc/passwd" has no
+    # drive, so Path.is_absolute() is False, yet root / it escapes the repo
+    if candidate.is_absolute() or PurePosixPath(rel).is_absolute() or PureWindowsPath(rel).anchor:
         raise PathEscapesRepo("%s: an absolute path is not allowed" % rel)
     if ".." in candidate.parts:
         raise PathEscapesRepo("%s: '..' is not allowed" % rel)
