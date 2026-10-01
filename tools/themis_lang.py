@@ -4,7 +4,7 @@ Purpose: for Rust, Go, Swift, Kotlin, Java, C# and JS/TS source text, find
 every comment (string- and nesting-aware), measure each function's length
 in lines, mark Rust test modules, spot generated files, match history words
 in comments, and clamp per-extension limits to the hard limits.
-Entry points: EXTENSIONS, functions(), comments(), test_spans(),
+Entry points: EXTENSIONS, analyse(), functions(), comments(), test_spans(),
 generated(), generated_honoured(), history_hits(), measure_text(),
 clamp_limits(), lang_violations(); legacy_comments() and
 python_comments() are re-exported from themis_scan.
@@ -435,43 +435,38 @@ class _Finder:
                               % self.stack[0].line)
 
 
-def _find(text: str, ext: str, limit: int = 100) -> Tuple[Optional[_Finder], List[str]]:
+def analyse(text: str, ext: str, limit: int = 100) -> Tuple[Dict[str, int], List[str], List[Tuple[int, int]], Dict[int, str]]:
+    """One scan of a file: (function sizes, notes, Rust test-module spans,
+    comments by line). Notes say what could not be read, including a block
+    over `limit` lines outside any function that was not recognised as one."""
     lang = _FAMILY.get(ext)
     if lang is None:
-        return None, ["%s: extension not measured" % ext]
+        return {}, ["%s: extension not measured" % ext], [], {}
     scan = Scan(text, lang)
+    found: Dict[int, str] = {}
+    for number, part in scan.comments:
+        found[number] = found.get(number, "") + part
     if scan.broken:
-        return None, ["nesting too deep to read: functions not measured"]
+        return {}, ["nesting too deep to read: functions not measured"], [], found
     finder = _Finder(scan, lang, limit)
     finder.run()
-    return finder, finder.notes
+    return finder.sizes, finder.notes, (finder.tests if ext == ".rs" else []), found
 
 
 def functions(text: str, ext: str, limit: int = 100) -> Tuple[Dict[str, int], List[str]]:
-    """({qualified name: lines}, notes). Notes say what could not be read,
-    including a block over `limit` lines outside any function that was not
-    recognised as one."""
-    finder, notes = _find(text, ext, limit)
-    return (finder.sizes if finder else {}), notes
+    """({qualified name: lines}, notes) from analyse()."""
+    sizes, notes, _, _ = analyse(text, ext, limit)
+    return sizes, notes
 
 
 def test_spans(text: str, ext: str) -> List[Tuple[int, int]]:
     """Line spans of Rust `#[cfg(test)] mod` blocks; empty for other languages."""
-    if ext != ".rs":
-        return []
-    finder, _ = _find(text, ext)
-    return finder.tests if finder else []
+    return analyse(text, ext)[2]
 
 
 def comments(text: str, ext: str) -> Dict[int, str]:
     """Line number -> comment text, string- and nesting-aware."""
-    lang = _FAMILY.get(ext)
-    if lang is None:
-        return {}
-    found: Dict[int, str] = {}
-    for number, part in Scan(text, lang).comments:
-        found[number] = found.get(number, "") + part
-    return found
+    return analyse(text, ext)[3]
 
 
 # ---- generated files ---------------------------------------------------------
@@ -579,7 +574,8 @@ def clamp_limits(config_limits: object, ext: str, file_max: int, function_max: i
 # ---- baseline ratchet for these languages ----------------------------------
 def measure_text(text: str, ext: str, pattern: "re.Pattern[str]") -> Tuple[Dict[str, int], int]:
     """(function sizes, history line count) of one file's text."""
-    return functions(text, ext)[0], len(history_hits(comments(text, ext), pattern))
+    sizes, _, _, found = analyse(text, ext)
+    return sizes, len(history_hits(found, pattern))
 
 
 def lang_violations(old_text: str, new_text: str, base_measure) -> List[str]:

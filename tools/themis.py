@@ -264,10 +264,8 @@ def measure_file(path: str, text: str, pattern: "re.Pattern[str]", limits: Optio
     measure.file_limit, measure.function_limit = lang.clamp_limits(limits, ext, FILE_MAX_LINES, FUNCTION_MAX_LINES)
     style = LANGUAGES.get(ext)
     if measure.is_lang:
-        measure.functions, notes = lang.functions(text, ext, measure.function_limit)
+        measure.functions, notes, measure.test_spans, found = lang.analyse(text, ext, measure.function_limit)
         measure.notes = ["%s: %s" % (path, n) for n in notes]
-        measure.test_spans = lang.test_spans(text, ext)
-        found = lang.comments(text, ext)
     elif style is None:
         measure.function_gap = "%s: not measured (unknown extension)" % ext
         return measure
@@ -380,6 +378,8 @@ def check_file(measure: Measure, baseline: dict, config: dict, found: Findings) 
 def _generated_skip(root: Path, path: str, text: str, base_ref: str, found: Findings) -> bool:
     """A generated-file marker exempts a file only if its version at the
     base commit carried one; the secret scan never looks at this."""
+    if lang.generated(text) is None:
+        return False
     try:
         base_text: Optional[str] = read(root, path, base_ref)
     except subprocess.CalledProcessError:
