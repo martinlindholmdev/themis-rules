@@ -1,0 +1,15 @@
+#!/bin/sh
+# Purpose: refuse a commit whose staged changes break the themis size,
+# history-comment, baseline-ratchet, or secret checks.
+# Entry points: git runs this before every commit once hooksPath points
+# here, or once its call line is appended to an existing hook.
+# Invariants: reads the staged copies and the staged diff only; changes
+# nothing; exit 0 lets the commit through, anything else stops it with
+# the check's own message.
+# Never change without a decision: which checks run here.
+root=$(git rev-parse --show-toplevel) || exit 1
+py=$(command -v python3 || command -v python) || {
+    echo "themis: needs python 3.9+ on PATH"
+    exit 1
+}
+exec "$py" "$root/tools/themis.py" check --staged

@@ -1,0 +1,95 @@
+name: ci
+on:
+  pull_request:
+  push:
+    branches: [main]
+jobs:
+  unit-tests:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        python-version: ["3.9", "3.13"]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: unit tests
+        run: python -m unittest discover -s tests -v
+      - name: this repo obeys its own rules
+        run: python tools/themis.py check
+
+  end-to-end:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: build a scratch repo
+        shell: bash
+        run: |
+          mkdir "$RUNNER_TEMP/scratch"
+          cd "$RUNNER_TEMP/scratch"
+          git init -q
+          git config user.email "scratch@example.com"
+          git config user.name "Scratch"
+          printf 'def add(a, b):\n    return a + b\n' > main.py
+          git add main.py
+          git commit -q -m init
+      - name: install.py --dry-run
+        shell: bash
+        working-directory: ${{ runner.temp }}/scratch
+        run: python "$GITHUB_WORKSPACE/install.py" install --dry-run --defaults
+      - name: install.py --defaults --yes
+        shell: bash
+        working-directory: ${{ runner.temp }}/scratch
+        run: python "$GITHUB_WORKSPACE/install.py" install --defaults --yes
+      - name: commit a normal file (must pass)
+        shell: bash
+        working-directory: ${{ runner.temp }}/scratch
+        run: |
+          git add -A
+          git commit -q -m "install themis"
+          printf 'def mul(a, b):\n    return a * b\n' > util.py
+          git add util.py
+          git commit -q -m "add util.py"
+      - name: commit an 850-line file (must be refused)
+        shell: bash
+        working-directory: ${{ runner.temp }}/scratch
+        run: |
+          python - <<'PY'
+          lines = ["def big():"] + ["    x = %d" % i for i in range(848)] + ["    return x"]
+          open("oversized.py", "w").write("\n".join(lines) + "\n")
+          PY
+          git add oversized.py
+          if git commit -q -m "add oversized.py"; then
+            echo "oversized.py should have been refused" >&2
+            exit 1
+          fi
+          git reset -q oversized.py
+          rm oversized.py
+      - name: commit a fake key (must be refused)
+        shell: bash
+        working-directory: ${{ runner.temp }}/scratch
+        run: |
+          python - <<'PY'
+          open("creds.py", "w").write('API_KEY = "%s%s"\n' % ("sk-", "1234567890abcdef1234"))
+          PY
+          git add creds.py
+          if git commit -q -m "add creds.py"; then
+            echo "creds.py should have been refused" >&2
+            exit 1
+          fi
+          git reset -q creds.py
+          rm creds.py
+      - name: uninstall
+        shell: bash
+        working-directory: ${{ runner.temp }}/scratch
+        run: python "$GITHUB_WORKSPACE/install.py" uninstall --yes
