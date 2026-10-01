@@ -12,8 +12,10 @@ Invariants: standard library only, python3 3.9+; pure functions over text,
 with no file or git access, no printing and no module-level mutable state;
 odd input yields notes, never an exception; time is linear in the file plus
 at most 2,000 characters per brace; a size runs from a function's first line
-to its last; an anonymous function body outside any function is measured
-too: with a binding name it runs first line to last and closures inside
+to its last; a long block outside any function whose header holds the
+language's function keyword but is not recognised is keyed <unmeasured>#n
+and refused like a function, other long unrecognised blocks are notes; an
+anonymous function body outside any function is measured too: with a binding name it runs first line to last and closures inside
 count toward it; without one (<anonymous>#n) its size is its own lines, its
 span minus the spans of the function blocks inside it, each measured and
 keyed itself; a closure inside a named function counts toward that function.
@@ -79,6 +81,10 @@ _SIG = {
 _SWIFT_VAR = re.compile(r"\bvar\s+(\w+)\s*:\s*[^=]+$", re.S)
 _GO_TYPE = re.compile(r"\b(struct|interface)\s*$")
 _PAREN_PAIR = re.compile(r"\([^()]*\)")
+_SQUARE_PAIR = re.compile(r"\[[^\[\]]*\]")
+_NO_WORD = re.compile(r"(?!x)x")
+_FUNC_WORD = {"rust": re.compile(r"\bfn\b"), "go": re.compile(r"\bfunc\b"), "swift": re.compile(r"\bfunc\b"),
+              "kotlin": re.compile(r"\bfun\b"), "js": re.compile(r"\bfunction\b")}
 _TEST_MOD = re.compile(r"#\[\s*cfg\s*\(\s*test\s*\)\s*\]\s*(?:#\[[^\]]*\]\s*)*"
                        r"(?:pub(?:\([^)]*\))?\s+)?mod\s+(\w+)\s*$")
 _TRAILER = {
@@ -146,6 +152,13 @@ def _first_call(header: str) -> Optional[Tuple[str, int, str]]:
     return None
 
 
+def _without_square(text: str) -> str:
+    """The text with every `[...]` removed, so a `;` in an array type is not a statement end."""
+    while _SQUARE_PAIR.search(text):
+        text = _SQUARE_PAIR.sub("", text)
+    return text
+
+
 def _sig_func(h: str, lang: str) -> Optional[Tuple[str, str, int]]:
     """A Rust, Go, Swift or Kotlin function header ending at the brace."""
     if lang not in _SIG:
@@ -159,7 +172,7 @@ def _sig_func(h: str, lang: str) -> Optional[Tuple[str, str, int]]:
     flat = rest
     while _PAREN_PAIR.search(flat):
         flat = _PAREN_PAIR.sub("", flat)
-    if ";" in rest or (lang in ("swift", "kotlin") and "=" in re.sub(r"->|==|<=|>=|!=", "", flat)):
+    if ";" in _without_square(rest) or (lang in ("swift", "kotlin") and "=" in re.sub(r"->|==|<=|>=|!=", "", flat)):
         return None
     return "func", name, m.start()
 
@@ -294,11 +307,12 @@ _NAMED = ("func", "container", "test")
 
 
 class _Frame:
-    __slots__ = ("kind", "name", "start", "seg", "line", "arg", "nested", "covered")
+    __slots__ = ("kind", "name", "start", "seg", "line", "arg", "nested", "covered", "keyword")
 
     def __init__(self, kind: str, line: int, arg: int = 0) -> None:
         self.kind, self.line, self.arg = kind, line, arg
         self.name, self.start, self.seg, self.nested, self.covered = "", line, 0, False, 0
+        self.keyword = False
 
 
 class _Finder:
@@ -379,6 +393,7 @@ class _Finder:
                     kind, name, pos = "func", top.name, m.start(1)
         f = _Frame(kind, line)
         f.name, f.seg, f.nested = name, self.seg, in_paren
+        f.keyword = kind in ("block", "type") and bool(_FUNC_WORD.get(self.lang, _NO_WORD).search(header))
         f.start = self.scan.line_at(hs + pos) if kind in ("func", "test") else line
         self.counted += self.counts(f)
         self.stack.append(f)
@@ -403,6 +418,9 @@ class _Finder:
         elif f.kind in ("block", "type") and line - f.start + 1 > self.limit and not self.in_function():
             self.notes.append("lines %d-%d: a block of %d lines was not recognised as a function"
                               % (f.start, line, line - f.start + 1))
+            if f.keyword:
+                self.seen["<unmeasured>"] = n = self.seen.get("<unmeasured>", 0) + 1
+                self.sizes["<unmeasured>#%d" % n] = line - f.start + 1
         self.seg = f.seg if f.kind == "type" or f.nested else i + 1
 
     def in_function(self) -> bool:

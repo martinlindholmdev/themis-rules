@@ -261,6 +261,22 @@ class ReviewHoleTests(unittest.TestCase):
                 sizes, _ = lang.functions(template % BODY, ext)
                 self.assertGreater(sizes.get(key, 0), 100)
 
+    def test_rust_array_types_in_signatures_are_measured(self):
+        cases = ["fn key() -> [u8; 32] {\n%s\n}\n", "fn key(p: [bool; 2]) {\n%s\n}\n",
+                 "fn key() -> Result<Zeroizing<[u8; 32]>, E> {\n%s\n}\n",
+                 "impl S {\n    pub fn key(&self) -> [u8; 32] {\n%s\n    }\n}\n"]
+        for template in cases:
+            with self.subTest(template=template.split("{")[0]):
+                sizes, notes = lang.functions(template % BODY, ".rs")
+                self.assertGreater(max(sizes.values(), default=0), 100)
+                self.assertEqual(notes, [])
+
+    def test_a_long_block_with_a_function_keyword_fails_closed(self):
+        odd = "fn odd(x: (u8; 3)) {\n%s\n}\n" % BODY
+        sizes, notes = lang.functions(odd, ".rs")
+        self.assertGreater(sizes.get("<unmeasured>#1", 0), 100)
+        self.assertEqual(len(notes), 1)
+
     def test_a_long_unrecognised_block_is_noted_not_silent(self):
         long_table = "const table = {\n%s\n}\n" % "\n".join("  k%d: %d," % (i, i) for i in range(150))
         sizes, notes = lang.functions(long_table, ".ts")

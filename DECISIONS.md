@@ -77,7 +77,8 @@ there. `tools/themis.py` and `install.py` never raise this file, and
   counts its own lines, its span minus the function blocks inside it, each
   of which is measured too; wrapping code in callbacks does not hide it.
 - A long block outside any function that is not recognised as a function
-  is a note, not a failure: a data table must not block a commit, and a
-  missed shape must not be silent.
+  is a note: a data table must not block a commit, and a missed shape must
+  not be silent. When its header holds the language's function keyword it
+  is also keyed `<unmeasured>#n` and refused like a long function.
 - C and C++ are not measured for function length yet; their macro-shaped
   headers and preprocessor branches need a separate reader.
