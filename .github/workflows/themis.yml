@@ -24,12 +24,16 @@ jobs:
           fi
           HEAD="${{ github.sha }}"
           ZERO="0000000000000000000000000000000000000000"
+          EMPTY_TREE="4b825dc642cb6eb9a060e54bf8d69288fbee4904"
           if [ -z "$BASE" ] || [ "$BASE" = "$ZERO" ]; then
             # a brand-new branch has nothing to diff against (push) or
-            # this PR itself installs Themis (no base copy yet) — a
-            # whole-tree check at HEAD is all there is to run.
-            python3 tools/themis.py check
-            exit $?
+            # this PR itself installs Themis (no base copy yet) — git's
+            # well-known empty-tree hash stands in as BASE, so the range
+            # below still scans every line of the tree for secrets
+            # (nothing "added" is skipped just because there is no
+            # earlier commit) instead of only running a bare whole-tree
+            # size/comment check.
+            BASE="$EMPTY_TREE"
           fi
           # run the BASE commit's own copy of the checker, never the one
           # on this branch — otherwise a change that neuters

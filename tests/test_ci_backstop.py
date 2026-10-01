@@ -167,6 +167,44 @@ class CiBackstopTests(unittest.TestCase):
             self.assertIn("looks like an OpenAI-shaped key", result.stdout)
             self.assertNotIn(secret, result.stdout)
 
+    def test_a_brand_new_branch_push_with_a_secret_is_also_caught(self):
+        """Astra's re-check [4]: github.event.before is all zeros on a
+        brand-new branch, so the old script ran a bare whole-tree check
+        with no secret scan at all — a key committed on the very first
+        push would never be caught."""
+        script = extract_pr_script(install.CI_WORKFLOW)
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp) / "repo"
+            repo.mkdir()
+            runner_temp = Path(tmp) / "runner_temp"
+            runner_temp.mkdir()
+            git(repo, "init", "-q")
+            git(repo, "config", "user.email", "t@example.com")
+            git(repo, "config", "user.name", "t")
+            (repo / "tools").mkdir()
+            (repo / "tools" / "themis.py").write_bytes((ROOT / "tools" / "themis.py").read_bytes())
+            (repo / "themis.json").write_text('{"version": "v3"}\n', encoding="utf-8")
+            secret = "sk-" + "1234567890abcdef1234"
+            (repo / "main.py").write_text('API_KEY = "%s"\n' % secret, encoding="utf-8")
+            git(repo, "add", "-A")
+            git(repo, "commit", "-q", "-m", "first commit on a brand-new branch", "--no-verify")
+            head_sha = subprocess.run(["git", "-C", str(repo), "rev-parse", "HEAD"],
+                                       check=True, capture_output=True, text=True).stdout.strip()
+
+            env = {
+                "PATH": __import__("os").environ["PATH"],
+                "GITHUB_EVENT_NAME": "push",
+                "PR_BASE_SHA": "",
+                "EVENT_BEFORE": "0000000000000000000000000000000000000000",
+                "GITHUB_SHA": head_sha,
+                "RUNNER_TEMP": str(runner_temp),
+            }
+            result = subprocess.run([self.bash, "-c", script], cwd=str(repo), env=env,
+                                     capture_output=True, text=True)
+            self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertIn("looks like an OpenAI-shaped key", result.stdout)
+            self.assertNotIn(secret, result.stdout)
+
 
 if __name__ == "__main__":
     unittest.main()
