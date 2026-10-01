@@ -3,7 +3,11 @@
  "exempt_prefixes": [
   "tests/fixtures/"
  ],
- "extra_history_words": [],
+ "extra_history_words": [
+  "Astra",
+  "Fable",
+  "M4 #"
+ ],
  "extra_extensions": [],
  "decision_log": "DECISIONS.md",
  "version": "v3"

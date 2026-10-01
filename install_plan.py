@@ -132,7 +132,8 @@ def print_plan(changes: List[Change]) -> None:
                 # of scrolling a ~600-line diff past the owner.
                 lines = change.new.count("\n") or 1
                 digest = hashlib.sha256(change.new.encode("utf-8")).hexdigest()
-                print("write   %s (%d lines, identical to Themis v3, sha256 %s)" % (change.rel, lines, digest))
+                print("write   %s (%d line%s, identical to Themis v3, sha256 %s)"
+                      % (change.rel, lines, "" if lines == 1 else "s", digest))
             else:
                 # everything else this install creates (the AGENTS.md
                 # block, themis.json, CLAUDE.md, the fresh baseline) is
@@ -461,7 +462,7 @@ def _merge_aider_read(text: str) -> Optional[str]:
     prints the instruction instead of touching the file."""
     match = re.search(r"^read:[ \t]*(.*)$", text, re.MULTILINE)
     if not match:
-        return text.rstrip("\n") + "\nread:\n  - AGENTS.md  # themis\n"
+        return text.rstrip("\n") + "\nread:  # themis\n  - AGENTS.md  # themis\n"
     inline = match.group(1).strip()
     start, end = match.start(), match.end()
     if inline.startswith("[") and inline.endswith("]"):
@@ -470,7 +471,22 @@ def _merge_aider_read(text: str) -> Optional[str]:
         return text[:end] + "\n  - AGENTS.md  # themis" + text[end:]
     return text[:start] + "read:\n  - %s\n  - AGENTS.md  # themis" % inline + text[end:]
 
-def plan_adapters(root: Path) -> Tuple[List[Change], List[str]]:
+AIDER_FILE = ".aider.conf.yml"
+AIDER_NEW = "read: AGENTS.md  # themis\ngit-commit-verify: true  # themis\n"
+
+
+def aider_in_use(root: Path) -> bool:
+    """Aider leaves these behind; its presence means the owner uses it."""
+    if any((root / n).exists() for n in (AIDER_FILE, ".aider.chat.history.md", ".aider.input.history")):
+        return True
+    if any(root.glob(".aider.tags.cache*")):
+        return True
+    ignore = read_text(root, ".gitignore") or ""
+    return any(line.strip().rstrip("/") == ".aider" or line.strip().startswith(".aider")
+               for line in ignore.splitlines())
+
+
+def plan_adapters(root: Path, agents: Tuple[str, ...] = ()) -> Tuple[List[Change], List[str]]:
     """Only touches a framework's OWN file when that file already exists
     (detection = the agent is in use here); never creates one. Claude is
     the one exception — AGENTS.md is useless to an older Claude Code
@@ -485,7 +501,15 @@ def plan_adapters(root: Path) -> Tuple[List[Change], List[str]]:
     elif "@AGENTS.md" not in claude:
         changes.append(Change("CLAUDE.md", claude, claude.rstrip("\n") + "\n@AGENTS.md\n"))
 
-    aider = read_text(root, ".aider.conf.yml")
+    aider = read_text(root, AIDER_FILE)
+    if aider is None and not (root / AIDER_FILE).is_symlink():
+        if "aider" in agents or aider_in_use(root):
+            # Aider's auto-commit runs `git commit --no-verify` unless this
+            # file says otherwise, so without it the hook never runs there.
+            changes.append(Change(AIDER_FILE, None, AIDER_NEW))
+        else:
+            notes.append("Aider commits skip git hooks unless .aider.conf.yml sets git-commit-verify: true; "
+                         "if you use Aider, re-run with --agents aider")
     if aider is not None and "AGENTS.md" not in aider:
         new_aider = _merge_aider_read(aider)
         if new_aider is None:
@@ -577,7 +601,8 @@ def build_install_plan(root: Path, args: argparse.Namespace) -> Tuple[List[Chang
     hook_changes, hook_notes = plan_hook(root)
     changes += hook_changes
     notes += hook_notes
-    adapter_changes, adapter_notes = plan_adapters(root)
+    adapter_changes, adapter_notes = plan_adapters(
+        root, tuple(a.strip().lower() for a in (getattr(args, "agents", None) or "").split(",")))
     changes += adapter_changes
     notes += adapter_notes
     changes += plan_ci_workflow(root)
@@ -629,127 +654,3 @@ def print_commit_instructions(root: Path, changes: List[Change], message: str,
             print("  # " + line)
     if not os.access(root / ".git", os.W_OK):
         print("  (.git looked read-only here; run the above outside this sandbox)")
-
-# -------------------------------------------------------------- uninstall
-
-def _strip_block(text: Optional[str], begin: str, end: str) -> Optional[str]:
-    if not text or begin not in text or end not in text:
-        return text
-    start = text.index(begin)
-    stop = text.index(end) + len(end)
-    if text[stop:stop + 1] == "\n":
-        stop += 1
-    return text[:start] + text[stop:]
-
-def _strip_marked_lines(text: Optional[str], marker: str) -> Optional[str]:
-    if not text:
-        return text
-    kept = [line for line in text.splitlines(keepends=True) if marker not in line]
-    return "".join(kept)
-
-def plan_remove_core_files(root: Path) -> List[Change]:
-    changes = []
-    for rel in ("tools/themis.py", THEMIS.CONFIG_NAME, "themis-baseline.json"):
-        text = read_text(root, rel)
-        if text is not None:
-            changes.append(Change(rel, text, None))
-    hook = read_text(root, "tools/hooks/pre-commit")
-    if hook is not None and hook == (HERE / "tools" / "hooks" / "pre-commit").read_text(encoding="utf-8"):
-        changes.append(Change("tools/hooks/pre-commit", hook, None))
-    return changes
-
-def _strip_standing_permissions(text: str) -> str:
-    """Removes only the heading and its exact three bullets — never
-    everything to EOF, which would take an owner's own later sections
-    ("## Deploy notes" and all) down with it."""
-    marker = "\n## Standing permissions\n"
-    start = text.find(marker)
-    if start == -1:
-        return text
-    rest = text[start + len(marker):]
-    lines = rest.splitlines(keepends=True)
-    bullets = 0
-    while bullets < 3 and bullets < len(lines) and lines[bullets].startswith("- "):
-        bullets += 1
-    end = start + len(marker) + sum(len(l) for l in lines[:bullets])
-    return text[:start] + text[end:]
-
-def plan_remove_agents_md(root: Path) -> List[Change]:
-    text = read_text(root, "AGENTS.md")
-    if text is None:
-        return []
-    match = ANY_MARKER.search(text)
-    if not match:
-        return []
-    new_text = _strip_block(text, "<!-- %s %s begin -->" % (match.group(1), match.group(2)),
-                             "<!-- %s %s end -->" % (match.group(1), match.group(2)))
-    new_text = _strip_standing_permissions(new_text)
-    if new_text is not None and new_text.strip() == "":
-        return [Change("AGENTS.md", text, None)]
-    return [] if new_text == text else [Change("AGENTS.md", text, new_text)]
-
-def plan_remove_adapters(root: Path) -> List[Change]:
-    changes = []
-    claude = read_text(root, "CLAUDE.md")
-    if claude is not None:
-        if claude == "@AGENTS.md\n":
-            changes.append(Change("CLAUDE.md", claude, None))
-        elif "@AGENTS.md" in claude:
-            stripped = _strip_marked_lines(claude, "@AGENTS.md")
-            changes.append(Change("CLAUDE.md", claude, stripped))
-    for rel in (".aider.conf.yml", "GEMINI.md"):
-        text = read_text(root, rel)
-        if text and "# themis" in text:
-            changes.append(Change(rel, text, _strip_marked_lines(text, "# themis")))
-    ci = read_text(root, ".github/workflows/themis.yml")
-    if ci == CI_WORKFLOW:
-        changes.append(Change(".github/workflows/themis.yml", ci, None))
-    return changes
-
-def _is_trivial_hook(text: str) -> bool:
-    """True once only a shebang (or nothing) is left — the file install
-    would have created from scratch, were the file not left in place."""
-    lines = [l for l in text.splitlines() if l.strip()]
-    return not lines or (len(lines) == 1 and lines[0].startswith("#!"))
-
-def plan_remove_hook(root: Path) -> Tuple[List[Change], List[str]]:
-    """Removes only the exact lines install added. Never deletes a whole
-    file here — lefthook.yml and .pre-commit-config.yaml are never
-    created by install (only appended to), and a hand-edited call line
-    that doesn't match our exact shape is left with a note instead of
-    guessed at."""
-    notes: List[str] = []
-    changes: List[Change] = []
-    for name in (".husky/pre-commit", "lefthook.yml", "lefthook.yaml", ".pre-commit-config.yaml"):
-        text = read_text(root, name)
-        if not text or CALL_LINE not in text:
-            continue
-        stripped = text.replace("\n" + LEFTHOOK_BLOCK, "").replace("\n" + PRECOMMIT_BLOCK, "") \
-            .replace("\n" + CALL_LINE + "\n", "\n")
-        if stripped == text:
-            notes.append("%s calls themis.py in a shape I don't recognise; remove that line by hand" % name)
-            continue
-        if stripped and not stripped.endswith("\n"):
-            stripped += "\n"  # the replace above must not eat the file's final newline
-        changes.append(Change(name, text, stripped))
-        if _is_trivial_hook(stripped):
-            notes.append("%s is now just a shebang; remove it by hand if no longer needed" % name)
-    try:
-        configured = subprocess.run(["git", "-C", str(root), "config", "--get", "core.hooksPath"],
-                                     capture_output=True, encoding="utf-8", errors="replace").stdout.strip()
-    except OSError:
-        configured = ""
-    if configured == "tools/hooks":
-        changes.append(Change("core.hooksPath", None, None, git_config=("--unset", "core.hooksPath")))
-    else:
-        hook_dir, _ = THEMIS.hooks_dir(root)
-        hook_file = hook_dir / "pre-commit"
-        if hook_file.is_file() and CALL_LINE in hook_file.read_text(encoding="utf-8", errors="replace"):
-            text = hook_file.read_text(encoding="utf-8", errors="replace")
-            new_text = text.replace("\n" + CALL_LINE + " || exit 1\n", "\n")
-            rel = os.path.relpath(hook_file, root)
-            if new_text != text:
-                changes.append(Change(rel, text, new_text, trusted=not configured))
-                if _is_trivial_hook(new_text):
-                    notes.append("%s is now just a shebang; remove it by hand if no longer needed" % rel)
-    return changes, notes

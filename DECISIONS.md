@@ -46,5 +46,12 @@ there. `tools/themis.py` and `install.py` never raise this file, and
 - The Aider adapter edits `read:` only as a block list or bare scalar,
   adding AGENTS.md on its own marked line; a flow list `[a, b]` is left
   alone with a note, since its single line cannot be undone cleanly.
-- The machine-mode writers live in `install.py`, the plan-building in
+- The machine-mode writers and the uninstall planners live in `install.py`, the install plan-building in
   `install_plan.py`, to keep both under the 800-line limit.
+- Aider's auto-commit skips git hooks without `.aider.conf.yml`'s
+  `git-commit-verify: true`, so when Aider is detected (or `--agents
+  aider` is passed) install creates that file, every line marked
+  `# themis`, and uninstall removes the file when only those lines are
+  left; otherwise install prints a note.
+- This repo's `extra_history_words` carry the reviewers' names so a
+  comment that cites one is caught by the checker itself.

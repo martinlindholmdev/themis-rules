@@ -142,22 +142,30 @@ antigravity.google/docs/settings, antigravity.google/docs/sandbox;
 secondary: agenticcontrolplane.com/controls/antigravity,
 agenticcontrolplane.com/blog/antigravity-permissions-reference.
 
-> **Headless Antigravity needs an explicit allow-rule.** Running
-> `agy -p "install Themis..."` unattended (no one at a terminal to
-> approve anything) does nothing unless the shell commands `install.py`
-> runs are already allow-listed under `permissions.allow` in
-> `~/.gemini/antigravity-cli/settings.json` — a release test saw the
-> command silently auto-denied with no output. Either add the allow
-> rule first, or run the install interactively so a person approves it.
+> **Headless Antigravity needs several allow-rules, not one.** Measured
+> on the M4 on 2026-10-01 (not taken from Google's documentation): an
+> unattended `agy -p "install Themis..."` only got through once its
+> settings allowed `toolPermission` `proceed-in-sandbox` (or an
+> equivalent), `command(git)`, and `read_url` for both `github.com` and
+> `raw.githubusercontent.com`. A narrow command allow-list alone failed
+> at its first `ls -la`. On a private repository it cannot read the docs
+> through raw URLs at all. Interactive use, where a person approves each
+> step, works without any of these.
 
 **Aider** — (a) reads nothing automatically; needs `read: AGENTS.md` in
 `.aider.conf.yml`, or `--read`. (b) `~/.aider.conf.yml`. (c) shell, and
 it auto-commits its own edits. (d) **skips hooks by default** —
 `git-commit-verify` defaults to `False`, i.e. commits run with
 `--no-verify` unless told otherwise. (e) `git-commit-verify: true` in
-config. (f) when `.aider.conf.yml` already exists, Themis adds
-`read: AGENTS.md` and `git-commit-verify: true` to it (never creates the
-file — that would turn Aider on for a repo that isn't using it). Source:
+config. (f) Aider's auto-commit runs `git commit --no-verify` without that
+setting (confirmed with `GIT_TRACE` on the M4, 2026-10-01), so when Aider
+is detected in the repo (`.aider.conf.yml`, `.aider.chat.history.md`,
+`.aider.tags.cache*`, or `.aider` in `.gitignore`) or `install --agents
+aider` is passed, Themis creates `.aider.conf.yml` with `read: AGENTS.md`
+and `git-commit-verify: true`, every line marked `# themis`; uninstall
+removes the file when only those lines remain. An existing file gets just
+those lines added (a flow-list `read: [a, b]` is left for you to edit).
+With no sign of Aider, install only prints a note. Source:
 aider.chat/docs/usage/conventions.html, aider.chat/docs/git.html.
 
 > **Aider cannot drive the install itself.** A release test with a small
