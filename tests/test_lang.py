@@ -249,6 +249,27 @@ class ReviewHoleTests(unittest.TestCase):
             with self.subTest(ext=ext):
                 self.assertGreater(lang.functions(source, ext)[0].get(key, 0), 100)
 
+    def test_a_long_function_in_an_awkward_header_is_still_measured(self):
+        cases = [
+            (".cs", "class C {\n  public T Run<T, U>(T t) where T : struct where U : class {\n%s\n  }\n}\n", "C.Run"),
+            (".ts", "class S {\n  async *gen<T extends {a: string}>(x: T): AsyncGenerator<T> {\n%s\n  }\n}\n", "S.gen"),
+            (".ts", "function f<T extends {a: string}>(x: T) {\n%s\n}\n", "f"),
+            (".java", "record P(int x) {\n  P {\n%s\n  }\n}\n", "P.P"),
+        ]
+        for ext, template, key in cases:
+            with self.subTest(key=key):
+                sizes, _ = lang.functions(template % BODY, ext)
+                self.assertGreater(sizes.get(key, 0), 100)
+
+    def test_a_long_unrecognised_block_is_noted_not_silent(self):
+        long_table = "const table = {\n%s\n}\n" % "\n".join("  k%d: %d," % (i, i) for i in range(150))
+        sizes, notes = lang.functions(long_table, ".ts")
+        self.assertEqual(sizes, {})
+        self.assertEqual(len(notes), 1)
+        self.assertIn("not recognised as a function", notes[0])
+        short = "const table = {\n%s\n}\n" % "\n".join("  k%d: %d," % (i, i) for i in range(50))
+        self.assertEqual(lang.functions(short, ".ts"), ({}, []))
+
     def test_a_wrapper_of_short_callbacks_is_not_one_long_function(self):
         tests = "".join('  it("t%d", () => {\n    a()\n    b()\n  })\n' % i for i in range(40))
         sizes, _ = lang.functions('describe("suite", () => {\n%s})\n' % tests, ".ts")

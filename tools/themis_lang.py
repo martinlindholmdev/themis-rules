@@ -46,6 +46,9 @@ EXTENSIONS = tuple(_FAMILY)
 
 _WINDOW = 2000
 _BRACKET = re.compile(r"[()\[\]{}\n]")
+_ANGLE = re.compile(r"(?<=[\w$])<|(?<![=\-])>|[()\[\]]")
+_CS_WHERE = re.compile(r"\bwhere\s+\w+\s*:")
+_RECORD_CTOR = re.compile(r"^\s*(?:(?:public|private|protected)\s+)?(\w+)\s*$")
 
 # ---- header classification ---------------------------------------------------
 _KW = {"if", "for", "while", "switch", "catch", "return", "new", "else", "do", "try", "foreach",
@@ -161,10 +164,25 @@ def _swift_var(h: str, lang: str) -> Optional[Tuple[str, str, int]]:
     return ("func", m.group(1), m.start()) if m else None
 
 
+def _open_angle(h: str) -> bool:
+    """True when the header is inside an unclosed generic `<...` at paren
+    depth 0 (a brace there is a type literal, not a body)."""
+    angle = paren = 0
+    for m in _ANGLE.finditer(h):
+        ch = m.group()
+        if ch in "([":
+            paren += 1
+        elif ch in ")]":
+            paren = max(paren - 1, 0)
+        elif paren == 0:
+            angle = angle + 1 if ch == "<" else max(angle - 1, 0)
+    return angle > 0
+
+
 def _container(h: str, lang: str) -> Optional[Tuple[str, str, int]]:
     if lang == "go":
         return None
-    mc = _CONTAINER[lang].search(h)
+    mc = _CONTAINER[lang].search(_CS_WHERE.split(h)[0] if lang == "csharp" else h)
     return ("container", next((g for g in mc.groups() if g), ""), 0) if mc else None
 
 
@@ -245,7 +263,7 @@ def _trailing_closure(h: str, lang: str) -> Optional[str]:
 def _classify(h: str, lang: str, outside: bool) -> Tuple[str, str, int]:
     """(kind, name, pos): kind is func, container, test, anon, type or block;
     pos is where a function or test module starts within h."""
-    if lang == "go" and _GO_TYPE.search(h):
+    if (lang == "go" and _GO_TYPE.search(h)) or (lang == "js" and _open_angle(h)):
         return "type", "", 0
     if lang == "rust":
         m = _TEST_MOD.search(h)
@@ -279,8 +297,8 @@ class _Frame:
 
 
 class _Finder:
-    def __init__(self, scan: Scan, lang: str) -> None:
-        self.scan, self.code, self.lang = scan, scan.code, lang
+    def __init__(self, scan: Scan, lang: str, limit: int) -> None:
+        self.scan, self.code, self.lang, self.limit = scan, scan.code, lang, limit
         self.sizes: Dict[str, int] = {}
         self.notes: List[str] = list(scan.notes)
         self.tests: List[Tuple[int, int]] = []
@@ -350,6 +368,10 @@ class _Finder:
             kind, name, pos = _classify(header, self.lang, outside)
             if in_paren and kind not in ("container", "anon", "func"):
                 kind = "type"
+            if kind == "block" and self.lang == "java" and top is not None and top.kind == "container":
+                m = _RECORD_CTOR.match(header)
+                if m and m.group(1) == top.name:
+                    kind, name, pos = "func", top.name, m.start(1)
         f = _Frame(kind, line)
         f.name, f.seg, f.nested = name, self.seg, in_paren
         f.start = self.scan.line_at(hs + pos) if kind in ("func", "test") else line
@@ -373,7 +395,13 @@ class _Finder:
             self.record(f, line)
         elif f.kind == "test":
             self.tests.append((f.start, line))
+        elif f.kind in ("block", "type") and line - f.start + 1 > self.limit and not self.in_function():
+            self.notes.append("lines %d-%d: a block of %d lines was not recognised as a function"
+                              % (f.start, line, line - f.start + 1))
         self.seg = f.seg if f.kind == "type" or f.nested else i + 1
+
+    def in_function(self) -> bool:
+        return any(s.kind in ("func", "anon") for s in self.stack)
 
     @staticmethod
     def counts(f: _Frame) -> int:
@@ -402,21 +430,23 @@ class _Finder:
                               % self.stack[0].line)
 
 
-def _find(text: str, ext: str) -> Tuple[Optional[_Finder], List[str]]:
+def _find(text: str, ext: str, limit: int = 100) -> Tuple[Optional[_Finder], List[str]]:
     lang = _FAMILY.get(ext)
     if lang is None:
         return None, ["%s: extension not measured" % ext]
     scan = Scan(text, lang)
     if scan.broken:
         return None, ["nesting too deep to read: functions not measured"]
-    finder = _Finder(scan, lang)
+    finder = _Finder(scan, lang, limit)
     finder.run()
     return finder, finder.notes
 
 
-def functions(text: str, ext: str) -> Tuple[Dict[str, int], List[str]]:
-    """({qualified name: lines}, notes). Notes say what could not be read."""
-    finder, notes = _find(text, ext)
+def functions(text: str, ext: str, limit: int = 100) -> Tuple[Dict[str, int], List[str]]:
+    """({qualified name: lines}, notes). Notes say what could not be read,
+    including a block over `limit` lines outside any function that was not
+    recognised as one."""
+    finder, notes = _find(text, ext, limit)
     return (finder.sizes if finder else {}), notes
 
 
@@ -481,7 +511,7 @@ _PARTICIPLES = {"set", "made", "done", "run", "built", "given", "taken", "shown"
 
 
 def _flagged(line: str, match: "re.Match[str]") -> bool:
-    word = match.group().lower()
+    word = " ".join(match.group().lower().split())
     if word == "used to":
         before = line[:match.start()]
         if _PRESENT_PASSIVE.search(before):
