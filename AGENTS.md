@@ -3,7 +3,7 @@
 This repo is the rules kit, and it obeys its own rules (see `RULES.md`,
 copied below between the markers, and `CONTRIBUTING.md`). Layout:
 `README.md` (what this is, for a person), `RULES.md` (the block any repo
-installs), `INSTALL.md` (the agent's view of installing it elsewhere),
+installs), `docs/install.md` (the agent's view of installing it elsewhere),
 `docs/frameworks.md` (the 17-surface support matrix), `tools/themis.py`
 (the vendored checker, never changed without updating every repo that
 has it), `install.py` (install/machine/uninstall, this repo only), and

@@ -1,7 +1,8 @@
 # Contributing
 
-This repo obeys its own rules (see `RULES.md` and `AGENTS.md`): `tools/themis.py`
-is installed here too, and a pre-commit hook runs it on every commit.
+This repository obeys its own rules (see `RULES.md` and `AGENTS.md`).
+`tools/themis.py` is installed here too, and a pre-commit hook runs it on
+every commit.
 
 Before sending a change:
 
@@ -10,19 +11,18 @@ python3 -m unittest discover -s tests
 python3 tools/themis.py status
 ```
 
-Both must be clean. If you touch `tools/themis.py` itself, remember it is
-vendored byte-for-byte into every repo that installs Themis — a behaviour
-change there is an upgrade for all of them, so it needs a test in
-`tests/`, not just a passing `status`.
+Both must be clean.
 
-Scope: `tools/themis.py` stays under 600 lines and standard-library only
-(no network, no dependencies — it is copied into other people's repos
-verbatim). `install.py` stays under 800 lines, no function over 100
-lines, and runs only in this repo, never vendored.
+`tools/themis.py` is copied byte for byte into every repository that
+installs Themis, so a behaviour change there is an upgrade for all of them
+and needs a test in `tests/`, not only a passing `status`. It stays under
+600 lines and standard-library only: no network, no dependencies.
+`install.py` stays under 800 lines with no function over 100, and runs only
+in this repository.
 
 Small, focused changes reviewed by a different model are preferred over
-large ones. See `RULES.md` rule 10 for what counts as small.
+large ones. `RULES.md` rule 10 says what counts as small.
 
-Security-relevant changes (the secret patterns, what `install.py` writes
-or executes, the machine-level pointer text) need the extra care in
-`SECURITY.md` — say so in the pull request.
+Security-relevant changes (the secret patterns, what `install.py` writes or
+executes, the machine-level pointer text) need the care described in
+`SECURITY.md`. Say so in the pull request.
