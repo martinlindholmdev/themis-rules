@@ -15,7 +15,7 @@ would raise any number or add any entry — the baseline only ever goes down.
 Invariants: standard library only, python3 3.9+, no network access;
 writes nothing except the baseline file, and only under `rebaseline`;
 every repo-specific value comes from `themis.json`, read fresh each run;
-"0 files measured" fails loudly; this script's own vendored copy is never
+"0 files measured" fails loudly; this script and its two siblings are never
 counted; a size or function limit may shrink, never grow; a matched
 secret is never printed, only its file, line and shape; git always runs
 with quotepath off, so non-ASCII filenames are measured; `--staged`
@@ -24,20 +24,20 @@ failing that, on HEAD) — never an unstaged edit on disk — so editing
 either in the same commit does nothing; `--range A...B` does the same
 against A.
 Never change without a decision: the two hard limits, the marker text,
-the themis.json field names, and the secret pattern list — this script is
-vendored byte-for-byte into every repo that installs it.
+the themis.json field names, and the secret pattern list — the three tools
+files are vendored byte-for-byte; themis_lang.py and themis_scan.py must sit
+beside this file or the run ends at once with one line.
 """
 
 from __future__ import annotations
 
 import argparse
 import ast
-import io
 import json
 import re
+import importlib.util
 import subprocess
 import sys
-import tokenize
 from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Dict, List, Optional, Tuple
 
@@ -47,11 +47,32 @@ FILE_MAX_LINES = 800
 FUNCTION_MAX_LINES = 100
 
 CONFIG_NAME = "themis.json"
-MARKER = re.compile(r"<!--\s*themis\s+(v\d+)\s+begin\s*-->")
+MARKER = re.compile(r"<!--\s*themis\s+(v\d+(?:\.\d+)*)\s+begin\s*-->")
 
-#: this script's own vendored path/name; excluded from every measured set.
-SELF_PATH = "tools/themis.py"
+#: the vendored tools files; excluded from every measured set.
+SELF_PATHS = ("tools/themis.py", "tools/themis_lang.py", "tools/themis_scan.py")
 SELF_NAME = "themis.py"
+
+
+def _load_sibling(name: str):
+    """Loads a file beside this one by path, never through sys.path, and
+    never leaves bytecode in the repo being checked."""
+    sys.dont_write_bytecode = True
+    path = Path(__file__).resolve().parent / (name + ".py")
+    if not path.is_file():
+        raise ImportError("tools/%s.py is missing beside themis.py; restore it or reinstall Themis" % name)
+    spec = importlib.util.spec_from_file_location(name, path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+try:
+    lang = _load_sibling("themis_lang")
+except ImportError as exc:
+    print("themis: cannot run: %s" % exc)
+    sys.exit(1)
+history_hits = lang.history_hits
 
 #: extension -> (line-comment prefix, block-comment (start, end), "python" if measurable)
 _HASH = ("#", None, None)
@@ -111,6 +132,9 @@ def _with_defaults(data: dict) -> dict:
     data.setdefault("extra_history_words", [])
     data.setdefault("extra_extensions", [])
     data.setdefault("decision_log", "the decision log")
+    for key in ("limits", "exempt_files"):
+        if not isinstance(data.setdefault(key, {}), dict):
+            data[key] = {}
     return data
 
 def load_config(root: Path) -> dict:
@@ -146,9 +170,10 @@ def history_pattern(config: dict) -> "re.Pattern[str]":
     return re.compile(HISTORY_WORDS.pattern + "|" + "|".join(extra), re.IGNORECASE)
 
 def is_exempt(path: str, config: dict) -> bool:
-    return any(path.startswith(p) for p in config["exempt_prefixes"])
+    return path in config.get("exempt_files", ()) or any(path.startswith(p) for p in config["exempt_prefixes"])
+
 def recognised_extensions(config: dict) -> List[str]:
-    return sorted(set(LANGUAGES) | set(config["extra_extensions"]))
+    return sorted(set(LANGUAGES) | set(lang.EXTENSIONS) | set(config["extra_extensions"]))
 
 def tree_files(root: Path, config: dict, ref: Optional[str] = None) -> List[str]:
     """Recognised source files at `ref` (a commit), or the working tree
@@ -160,13 +185,13 @@ def tree_files(root: Path, config: dict, ref: Optional[str] = None) -> List[str]
     else:
         listed = _git(root, "ls-tree", "-r", "--name-only", ref).splitlines()
     return sorted(p for p in set(listed)
-                  if Path(p).suffix in exts and not is_exempt(p, config) and p != SELF_PATH)
+                  if Path(p).suffix in exts and not is_exempt(p, config) and p not in SELF_PATHS)
 
 def staged_files(root: Path, config: dict) -> List[str]:
     exts = recognised_extensions(config)
     listed = _git(root, "diff", "--cached", "--name-only", "--diff-filter=ACMR").splitlines()
     return sorted(p for p in listed
-                  if Path(p).suffix in exts and not is_exempt(p, config) and p != SELF_PATH)
+                  if Path(p).suffix in exts and not is_exempt(p, config) and p not in SELF_PATHS)
 
 def seen_extensions(root: Path, config: dict) -> List[str]:
     """Names why a Vue/Dart-only repo measured nothing, instead of
@@ -189,69 +214,23 @@ class Measure:
         self.lines = 0
         self.functions: Dict[str, int] = {}
         self.function_gap: Optional[str] = None
+        self.notes: List[str] = []
         self.history: List[Tuple[int, str]] = []
+        self.test_spans: List[Tuple[int, int]] = []
+        self.file_limit, self.function_limit = FILE_MAX_LINES, FUNCTION_MAX_LINES
 
-def _find_unescaped(work: str, token: str) -> int:
-    """Like str.find, but a hit right after ':' ('//' in 'https://') isn't one."""
-    start = 0
-    while True:
-        idx = work.find(token, start)
-        if idx <= 0 or work[idx - 1] != ":":
-            return idx
-        start = idx + len(token)
+    @property
+    def test_lines(self) -> int:
+        return sum(b - a + 1 for a, b in self.test_spans)
 
-def comments(text: str, style: Tuple[Optional[str], Optional[Tuple[str, str]], object]) -> Dict[int, str]:
-    """Line number -> comment text (not string-aware, but good enough to
-    catch history words). Python files use python_comments() instead."""
-    line_prefix, block, _ = style
-    found: Dict[int, str] = {}
-    in_block = False
-    for number, line in enumerate(text.splitlines(), start=1):
-        work = line
-        if in_block:
-            end = work.find(block[1])
-            found[number] = work if end == -1 else work[:end]
-            if end == -1:
-                continue
-            work, in_block = work[end + len(block[1]):], False
-        line_idx = _find_unescaped(work, line_prefix) if line_prefix else -1
-        block_idx = work.find(block[0]) if block else -1
-        if line_idx == -1 and block_idx == -1:
-            continue
-        if block_idx == -1 or (line_idx != -1 and line_idx < block_idx):
-            found[number] = found.get(number, "") + work[line_idx + len(line_prefix):]
-            continue
-        end = work.find(block[1], block_idx + len(block[0]))
-        if end == -1:
-            found[number] = found.get(number, "") + work[block_idx + len(block[0]):]
-            in_block = True
-        else:
-            found[number] = found.get(number, "") + work[block_idx + len(block[0]):end]
-    return found
+    @property
+    def counted(self) -> int:
+        """Lines counted against the file limit: a Rust test module's lines are not."""
+        return self.lines - self.test_lines
 
-def python_comments(text: str) -> Dict[int, str]:
-    """Via the tokenizer, so a '#' inside a string is never a false
-    comment; falls back to the generic scan if the file does not parse."""
-    found: Dict[int, str] = {}
-    try:
-        for tok in tokenize.generate_tokens(io.StringIO(text).readline):
-            if tok.type == tokenize.COMMENT:
-                found[tok.start[0]] = found.get(tok.start[0], "") + tok.string.lstrip("#")
-        return found
-    except (tokenize.TokenError, IndentationError, SyntaxError, ValueError):
-        return comments(text, LANGUAGES[".py"])
-
-def history_hits(found: Dict[int, str], pattern: "re.Pattern[str]") -> List[Tuple[int, str]]:
-    hits = []
-    for number in sorted(found):
-        line = found[number]
-        for match in pattern.finditer(line):
-            word = match.group()
-            if word.lower() == "used to" and _PRESENT_PASSIVE.search(line[:match.start()]):
-                continue
-            hits.append((number, word))
-            break
-    return hits
+    @property
+    def is_lang(self) -> bool:
+        return Path(self.path).suffix in lang.EXTENSIONS
 
 def python_functions(text: str) -> Tuple[Dict[str, int], Optional[str]]:
     try:
@@ -278,28 +257,37 @@ def python_functions(text: str) -> Tuple[Dict[str, int], Optional[str]]:
     visit(tree, "")
     return sizes, None
 
-def measure_file(path: str, text: str, pattern: "re.Pattern[str]") -> Measure:
+def measure_file(path: str, text: str, pattern: "re.Pattern[str]", limits: Optional[dict] = None) -> Measure:
     measure = Measure(path)
     measure.lines = len(text.splitlines())
-    style = LANGUAGES.get(Path(path).suffix)
-    if style is None:
-        measure.function_gap = "%s: not measured (unknown extension)" % Path(path).suffix
+    ext = Path(path).suffix
+    measure.file_limit, measure.function_limit = lang.clamp_limits(limits, ext, FILE_MAX_LINES, FUNCTION_MAX_LINES)
+    style = LANGUAGES.get(ext)
+    if measure.is_lang:
+        measure.functions, notes = lang.functions(text, ext, measure.function_limit)
+        measure.notes = ["%s: %s" % (path, n) for n in notes]
+        measure.test_spans = lang.test_spans(text, ext)
+        found = lang.comments(text, ext)
+    elif style is None:
+        measure.function_gap = "%s: not measured (unknown extension)" % ext
         return measure
-    is_python = style[2] == "python"
-    found = python_comments(text) if is_python else comments(text, style)
-    measure.history = history_hits(found, pattern)
-    if is_python:
-        measure.functions, gap = python_functions(text)
-        if gap:
-            measure.function_gap = "%s: %s" % (path, gap)
     else:
-        measure.function_gap = "%s: function length not measured for %s" % (path, Path(path).suffix)
+        is_python = style[2] == "python"
+        found = lang.python_comments(text) if is_python else lang.legacy_comments(text, style)
+        if is_python:
+            measure.functions, gap = python_functions(text)
+            if gap:
+                measure.function_gap = "%s: %s" % (path, gap)
+        else:
+            measure.function_gap = "%s: function length not measured for %s" % (path, ext)
+    measure.history = history_hits(found, pattern)
     return measure
 
 class Findings:
     def __init__(self) -> None:
         self.problems: List[str] = []
         self.notes: List[str] = []
+        self.generated: List[str] = []
 
 class PathEscapesRepo(ValueError):
     pass
@@ -354,48 +342,83 @@ def _parsed_baseline(text: str) -> dict:
     data.setdefault("files", {})
     data.setdefault("functions", {})
     data.setdefault("history_words", {})
+    section = data.setdefault("lang", {})
+    section.setdefault("functions", {})
+    section.setdefault("history_words", {})
     return data
 
 def check_file(measure: Measure, baseline: dict, config: dict, found: Findings) -> None:
     path = measure.path
-    allowed = max(FILE_MAX_LINES, baseline["files"].get(path, 0))
-    if measure.lines > allowed:
-        found.problems.append("%s: %d lines, over the %d-line limit. Split it; do not raise the baseline."
-                               % (path, measure.lines, FILE_MAX_LINES))
-    functions = baseline["functions"].get(path, {})
+    old = baseline.get("lang", {}) if measure.is_lang else baseline
+    allowed = max(measure.file_limit, baseline["files"].get(path, 0))
+    if measure.counted > allowed:
+        size = "%d lines" % measure.lines
+        if measure.test_lines:
+            size += " (%d production + %d test)" % (measure.counted, measure.test_lines)
+        found.problems.append("%s: %s, over the %d-line limit. Split it; do not raise the baseline."
+                               % (path, size, measure.file_limit))
+    for first, last in measure.test_spans:
+        if last - first + 1 > measure.file_limit:
+            found.problems.append("%s: the test module at lines %d-%d is %d lines, over the %d-line limit. "
+                                   "Split it." % (path, first, last, last - first + 1, measure.file_limit))
+    functions = old.get("functions", {}).get(path, {})
     for name, size in sorted(measure.functions.items()):
-        allowed = max(FUNCTION_MAX_LINES, functions.get(name, 0))
+        allowed = max(measure.function_limit, functions.get(name, 0))
         if size > allowed:
             found.problems.append("%s: function %s is %d lines, over the %d-line limit. Split it; "
-                                   "do not raise the baseline." % (path, name, size, FUNCTION_MAX_LINES))
-    allowed_history = baseline["history_words"].get(path, 0)
+                                   "do not raise the baseline." % (path, name, size, measure.function_limit))
+    allowed_history = old.get("history_words", {}).get(path, 0)
     if len(measure.history) > allowed_history:
         examples = ", ".join("line %d %r" % hit for hit in measure.history[:3])
         found.problems.append("%s: %d comment line(s) read as history (baseline %d), e.g. %s. Say what "
                                "the code does now; move the story to %s."
                                % (path, len(measure.history), allowed_history, examples, config["decision_log"]))
+    found.notes += measure.notes
     if measure.function_gap:
         found.notes.append(measure.function_gap)
 
-def run_checks(root: Path, paths: List[str], ref: Optional[str], baseline: dict, config: dict) -> Tuple[Findings, List[Measure]]:
+def _generated_skip(root: Path, path: str, text: str, base_ref: str, found: Findings) -> bool:
+    """A generated-file marker exempts a file only if its version at the
+    base commit carried one; the secret scan never looks at this."""
+    try:
+        base_text: Optional[str] = read(root, path, base_ref)
+    except subprocess.CalledProcessError:
+        base_text = None
+    marker, honoured = lang.generated_honoured(text, base_text)
+    if marker is not None:
+        found.generated += [path] if honoured else []
+        found.notes.append("%s: %s" % (path, "treated as generated (%s)" % marker if honoured
+                                       else "generated marker not honoured: new in this change"))
+    return honoured
+
+def run_checks(root: Path, paths: List[str], ref: Optional[str], baseline: dict, config: dict,
+               base_ref: str = "HEAD") -> Tuple[Findings, List[Measure]]:
     found = Findings()
     pattern = history_pattern(config)
-    measures = [measure_file(p, read(root, p, ref), pattern) for p in paths]
-    for measure in measures:
-        check_file(measure, baseline, config, found)
+    measures = []
+    for path in paths:
+        text = read(root, path, ref)
+        if _generated_skip(root, path, text, base_ref, found):
+            continue
+        measures.append(measure_file(path, text, pattern, config.get("limits")))
+        check_file(measures[-1], baseline, config, found)
     return found, measures
 
 def fresh_baseline(measures: List[Measure]) -> dict:
-    files = {m.path: m.lines for m in measures if m.lines > FILE_MAX_LINES}
-    functions: Dict[str, Dict[str, int]] = {}
+    files = {m.path: m.counted for m in measures if m.counted > m.file_limit}
+    tables: Dict[bool, Dict[str, Dict[str, int]]] = {False: {}, True: {}}
+    history: Dict[bool, Dict[str, int]] = {False: {}, True: {}}
     for m in measures:
-        over = {n: s for n, s in m.functions.items() if s > FUNCTION_MAX_LINES}
+        over = {n: s for n, s in m.functions.items() if s > m.function_limit}
         if over:
-            functions[m.path] = dict(sorted(over.items()))
-    history = {m.path: len(m.history) for m in measures if m.history}
+            tables[m.is_lang][m.path] = dict(sorted(over.items()))
+        if m.history:
+            history[m.is_lang][m.path] = len(m.history)
     owner_note = "Only this repo's owner changes this file, with a decision-log line naming why."
     return {"_owner": owner_note, "files": dict(sorted(files.items())),
-            "functions": dict(sorted(functions.items())), "history_words": dict(sorted(history.items()))}
+            "functions": dict(sorted(tables[False].items())), "history_words": dict(sorted(history[False].items())),
+            "lang": {"functions": dict(sorted(tables[True].items())),
+                     "history_words": dict(sorted(history[True].items()))}}
 
 def _committed_baseline_text(root: Path, config: dict) -> Optional[str]:
     """The baseline as committed (HEAD), else the one on disk, else None:
@@ -444,15 +467,28 @@ def baseline_ratchet_violations(head_text: str, new_text: str) -> List[str]:
                 problems.append("functions %s/%s: raised from %s to %s" % (path, name, old_size, size))
     return problems
 
+def lang_problems(root: Path, config: dict, rev: str, head_text: str, new_text: str) -> List[str]:
+    """New or raised `lang` entries must be backed by the base commit's own
+    version of the file, measured with the code running now."""
+    pattern = history_pattern(config)
+
+    def base_measure(path: str):
+        try:
+            return lang.measure_text(read(root, path, rev), Path(path).suffix, pattern)
+        except subprocess.CalledProcessError:
+            return None
+    return lang.lang_violations(head_text, new_text, base_measure)
+
 def baseline_problems(root: Path, config: dict, rev: str, new_ref: str, diff_args: Tuple[str, ...]) -> List[str]:
     if config["baseline_path"] not in changed_paths(root, *diff_args):
         return []
     new_text = read(root, config["baseline_path"], new_ref)
     try:
         head_text = read(root, config["baseline_path"], rev)
+        violations = baseline_ratchet_violations(head_text, new_text)
     except subprocess.CalledProcessError:
-        return []  # nothing committed yet at rev: this change is creating it
-    violations = baseline_ratchet_violations(head_text, new_text)
+        head_text, violations = "{}", []  # nothing committed at rev: this change creates it
+    violations += lang_problems(root, config, rev, head_text, new_text)
     if not violations:
         return []
     return ["%s: the baseline only goes down; split the file instead (%s)"
@@ -557,6 +593,17 @@ def hook_status(root: Path) -> str:
         return "%s; pre-commit calls %s — on" % (location, SELF_NAME)
     return "%s; a pre-commit file is there but does not call %s — off, foreign hook kept" % (location, SELF_NAME)
 
+def enforcement_level(root: Path, hook_on: bool) -> str:
+    workflows = root / ".github" / "workflows"
+    in_ci = workflows.is_dir() and any(
+        SELF_NAME in p.read_text(encoding="utf-8", errors="replace")
+        for p in sorted(workflows.iterdir()) if p.suffix in (".yml", ".yaml") and p.is_file())
+    if hook_on and in_ci:
+        return "blocking (the hook and a CI workflow both run it)"
+    if hook_on:
+        return "local hook only (skippable with --no-verify)"
+    return "CI only (commits are not checked locally)" if in_ci else "advisory: nothing runs automatically"
+
 def print_status(root: Path, config: dict) -> int:
     paths = tree_files(root, config)
     baseline = load_baseline(root, config)
@@ -570,11 +617,16 @@ def print_status(root: Path, config: dict) -> int:
     if config["version"] and config["version"] != SCRIPT_VERSION:
         print("  versions differ: themis.json says %s, this script is %s — re-run the install"
               % (config["version"], SCRIPT_VERSION))
-    print("  hook: %s" % hook_status(root))
+    hook = hook_status(root)
+    print("  hook: %s" % hook)
+    print("  enforcement: %s" % enforcement_level(root, hook.endswith("— on")))
     print("  python: %d.%d" % (sys.version_info[0], sys.version_info[1]))
     print("  files measured: %d" % len(paths))
     print("  extensions not function-measured: %s" % (", ".join(unmeasured) if unmeasured else "none seen"))
     print("  extensions seen but not measured at all: %s" % (", ".join(unseen) if unseen else "none"))
+    print("  generated files treated as such: %s" % (", ".join(found.generated) or "none"))
+    for path, reason in sorted(config.get("exempt_files", {}).items()):
+        print("  exempt file (size, function and history checks only): %s: %s" % (path, reason))
     if not paths:
         print("themis: FAIL, 0 files measured — check themis.json's extra_extensions "
               "and exempt_prefixes, or confirm this repo really has no recognised source files")
@@ -609,10 +661,9 @@ def run_tree(root: Path, config: dict) -> int:
     return _report(found.notes, found.problems, "themis: pass, %d file(s) checked" % len(paths))
 
 def _self_change_note(root: Path, diff_args: Tuple[str, ...]) -> List[str]:
-    if SELF_PATH in changed_paths(root, *diff_args):
-        return ["%s changed; owner only — a PR's own copy is never what CI "
-                 "checks it with, but review this by hand too" % SELF_PATH]
-    return []
+    changed = changed_paths(root, *diff_args)
+    return ["%s changed; owner only — a PR's own copy is never what CI "
+            "checks it with, but review this by hand too" % p for p in SELF_PATHS if p in changed]
 
 def run_staged(root: Path, config: dict) -> int:
     config, config_changed = enforcement_config(root, config, "HEAD", ("--cached",))
@@ -624,7 +675,7 @@ def run_staged(root: Path, config: dict) -> int:
     paths = staged_files(root, config)
     if paths:
         baseline = load_baseline_staged(root, config)
-        found, _ = run_checks(root, paths, ":", baseline, config)
+        found, _ = run_checks(root, paths, ":", baseline, config, "HEAD")
         notes += found.notes
         blocking += found.problems
     elif not blocking:
@@ -652,7 +703,7 @@ def run_range(root: Path, config: dict, range_arg: str) -> int:
         print("themis: FAIL, 0 files measured at %s" % b)
         return 1
     baseline = load_baseline(root, config, ref=b)
-    found, _ = run_checks(root, paths, b, baseline, config)
+    found, _ = run_checks(root, paths, b, baseline, config, a)
     notes += found.notes
     blocking += found.problems
     return _report(notes, blocking, "themis: pass, %d file(s) checked at %s" % (len(paths), b))
@@ -685,6 +736,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         committed = _committed_baseline_text(root, config)
         if committed is not None:
             raised = baseline_ratchet_violations(committed, json.dumps(fresh))
+            raised += lang_problems(root, config, "HEAD", committed, json.dumps(fresh))
             if raised:
                 print("themis: refusing — rebaseline would raise the baseline, which only goes down. "
                       "Split the file instead:")

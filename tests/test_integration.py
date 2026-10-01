@@ -37,6 +37,13 @@ def commit_all(path: Path, message: str, extra_args=()) -> None:
     subprocess.run(["git", "-C", str(path), "commit", "-q", "-m", message, *extra_args], check=True)
 
 
+def vendor_siblings(repo: Path) -> None:
+    """The installer copies only themis.py; the two siblings it needs are
+    placed by hand until the installer vendors them."""
+    for name in ("themis_lang.py", "themis_scan.py"):
+        (repo / "tools" / name).write_bytes((THEMIS.parent / name).read_bytes())
+
+
 def tree_hash(path: Path) -> dict:
     out = {}
     for item in sorted(path.rglob("*")):
@@ -52,7 +59,8 @@ class RangeCheckTests(unittest.TestCase):
             repo.mkdir()
             init_repo(repo)
             (repo / "tools").mkdir()
-            (repo / "tools" / "themis.py").write_bytes(THEMIS.read_bytes())
+            for name in ("themis.py", "themis_lang.py", "themis_scan.py"):
+                (repo / "tools" / name).write_bytes((THEMIS.parent / name).read_bytes())
             (repo / "themis.json").write_text('{"version": "v3"}\n', encoding="utf-8")
             (repo / "main.py").write_text("def add(a, b):\n    return a + b\n", encoding="utf-8")
             commit_all(repo, "base")
@@ -76,7 +84,8 @@ class RangeCheckTests(unittest.TestCase):
             repo.mkdir()
             init_repo(repo)
             (repo / "tools").mkdir()
-            (repo / "tools" / "themis.py").write_bytes(THEMIS.read_bytes())
+            for name in ("themis.py", "themis_lang.py", "themis_scan.py"):
+                (repo / "tools" / name).write_bytes((THEMIS.parent / name).read_bytes())
             (repo / "themis.json").write_text('{"version": "v3"}\n', encoding="utf-8")
             (repo / "main.py").write_text("def add(a, b):\n    return a + b\n", encoding="utf-8")
             commit_all(repo, "base")
@@ -96,7 +105,8 @@ class NonAsciiTests(unittest.TestCase):
             repo.mkdir()
             init_repo(repo)
             (repo / "tools").mkdir()
-            (repo / "tools" / "themis.py").write_bytes(THEMIS.read_bytes())
+            for name in ("themis.py", "themis_lang.py", "themis_scan.py"):
+                (repo / "tools" / name).write_bytes((THEMIS.parent / name).read_bytes())
             (repo / "themis.json").write_text('{"version": "v3"}\n', encoding="utf-8")
             (repo / "café.py").write_text("def pour():\n    return 1\n", encoding="utf-8")
             commit_all(repo, "add café.py")
@@ -129,6 +139,7 @@ class InstallLifecycleTests(unittest.TestCase):
             repo = self._fresh_repo(Path(tmp))
             first = run(repo, str(INSTALL), "install", "--defaults", "--yes")
             self.assertEqual(first.returncode, 0, first.stdout + first.stderr)
+            vendor_siblings(repo)
             commit_all(repo, "install themis")
 
             second = run(repo, str(INSTALL), "install", "--defaults", "--yes")
@@ -186,6 +197,7 @@ class UpgradeTests(unittest.TestCase):
             agents = (repo / "AGENTS.md").read_text(encoding="utf-8")
             self.assertIn("<!-- themis v3 begin -->", agents)
             self.assertNotIn("agent-rules v2", agents)
+            vendor_siblings(repo)
             commit_all(repo, "upgrade to themis v3")
 
             again = run(repo, str(INSTALL), "install", "--defaults", "--yes")

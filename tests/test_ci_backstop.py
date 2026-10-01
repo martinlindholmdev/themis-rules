@@ -92,7 +92,8 @@ class CiBackstopTests(unittest.TestCase):
             git(repo, "config", "user.name", "t")
 
             (repo / "tools").mkdir()
-            (repo / "tools" / "themis.py").write_bytes((ROOT / "tools" / "themis.py").read_bytes())
+            for name in ("themis.py", "themis_lang.py", "themis_scan.py"):
+                (repo / "tools" / name).write_bytes((ROOT / "tools" / name).read_bytes())
             (repo / "themis.json").write_text('{"version": "v3"}\n', encoding="utf-8")
             (repo / "main.py").write_text("def add(a, b):\n    return a + b\n", encoding="utf-8")
             git(repo, "add", "-A")
@@ -124,6 +125,43 @@ class CiBackstopTests(unittest.TestCase):
             self.assertIn("looks like an OpenAI-shaped key", result.stdout)
             self.assertNotIn(secret, result.stdout)
 
+    def test_a_pr_that_guts_its_own_themis_lang_is_still_caught(self):
+        script = extract_pr_script(install.PLAN.CI_WORKFLOW)
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp) / "repo"
+            repo.mkdir()
+            runner_temp = Path(tmp) / "runner_temp"
+            runner_temp.mkdir()
+            git(repo, "init", "-q")
+            git(repo, "config", "user.email", "t@example.com")
+            git(repo, "config", "user.name", "t")
+            (repo / "tools").mkdir()
+            for name in ("themis.py", "themis_lang.py", "themis_scan.py"):
+                (repo / "tools" / name).write_bytes((ROOT / "tools" / name).read_bytes())
+            (repo / "themis.json").write_text('{"version": "v3.1"}\n', encoding="utf-8")
+            (repo / "main.ts").write_text("export const a = 1;\n", encoding="utf-8")
+            git(repo, "add", "-A")
+            git(repo, "commit", "-q", "-m", "base")
+            base_sha = subprocess.run(["git", "-C", str(repo), "rev-parse", "HEAD"],
+                                       check=True, capture_output=True, text=True).stdout.strip()
+
+            (repo / "tools" / "themis_lang.py").write_text(
+                "EXTENSIONS = ()\ndef generated(text):\n    return 'x'\n", encoding="utf-8")
+            body = "".join("  step%d();\n" % i for i in range(120))
+            (repo / "main.ts").write_text("export function big() {\n%s}\n" % body, encoding="utf-8")
+            git(repo, "add", "-A")
+            git(repo, "commit", "-q", "-m", "gut the reader and add a long function", "--no-verify")
+            head_sha = subprocess.run(["git", "-C", str(repo), "rev-parse", "HEAD"],
+                                       check=True, capture_output=True, text=True).stdout.strip()
+
+            env = {"PATH": __import__("os").environ["PATH"], "GITHUB_EVENT_NAME": "pull_request",
+                   "PR_BASE_SHA": base_sha, "EVENT_BEFORE": "", "GITHUB_SHA": head_sha,
+                   "RUNNER_TEMP": str(runner_temp)}
+            result = subprocess.run([self.bash, "-c", script], cwd=str(repo), env=env,
+                                     capture_output=True, text=True)
+            self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertIn("function big", result.stdout)
+
     def test_a_push_with_a_secret_is_also_caught(self):
         """A hardening note from the independent review: push ran a whole-tree check with no
         secret scan at all; a secret pushed straight to a branch (no PR)
@@ -138,7 +176,8 @@ class CiBackstopTests(unittest.TestCase):
             git(repo, "config", "user.email", "t@example.com")
             git(repo, "config", "user.name", "t")
             (repo / "tools").mkdir()
-            (repo / "tools" / "themis.py").write_bytes((ROOT / "tools" / "themis.py").read_bytes())
+            for name in ("themis.py", "themis_lang.py", "themis_scan.py"):
+                (repo / "tools" / name).write_bytes((ROOT / "tools" / name).read_bytes())
             (repo / "themis.json").write_text('{"version": "v3"}\n', encoding="utf-8")
             (repo / "main.py").write_text("def add(a, b):\n    return a + b\n", encoding="utf-8")
             git(repo, "add", "-A")
@@ -182,7 +221,8 @@ class CiBackstopTests(unittest.TestCase):
             git(repo, "config", "user.email", "t@example.com")
             git(repo, "config", "user.name", "t")
             (repo / "tools").mkdir()
-            (repo / "tools" / "themis.py").write_bytes((ROOT / "tools" / "themis.py").read_bytes())
+            for name in ("themis.py", "themis_lang.py", "themis_scan.py"):
+                (repo / "tools" / name).write_bytes((ROOT / "tools" / name).read_bytes())
             (repo / "themis.json").write_text('{"version": "v3"}\n', encoding="utf-8")
             secret = "sk-" + "1234567890abcdef1234"
             (repo / "main.py").write_text('API_KEY = "%s"\n' % secret, encoding="utf-8")

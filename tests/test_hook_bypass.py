@@ -32,7 +32,8 @@ class HookBypassTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             repo = Path(tmp)
             (repo / "tools").mkdir()
-            (repo / "tools" / "themis.py").write_bytes(THEMIS.read_bytes())
+            for name in ("themis.py", "themis_lang.py", "themis_scan.py"):
+                (repo / "tools" / name).write_bytes((THEMIS.parent / name).read_bytes())
             (repo / "themis.json").write_text('{"version": "v3"}\n', encoding="utf-8")
             (repo / "main.py").write_text("def add(a, b):\n    return a + b\n", encoding="utf-8")
             init_repo(repo)

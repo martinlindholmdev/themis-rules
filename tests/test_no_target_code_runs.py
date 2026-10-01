@@ -23,7 +23,8 @@ class NoTargetCodeRunsTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             repo = Path(tmp)
             (repo / "tools").mkdir()
-            (repo / "tools" / "themis.py").write_bytes((ROOT / "tools" / "themis.py").read_bytes())
+            for name in ("themis.py", "themis_lang.py", "themis_scan.py"):
+                (repo / "tools" / name).write_bytes((ROOT / "tools" / name).read_bytes())
             # shadows the stdlib module `tools/themis.py` imports at startup
             (repo / "tools" / "argparse.py").write_text(
                 "open('pwned.txt', 'w').write('TARGET REPO CODE RAN')\nimport sys\nsys.exit(1)\n",

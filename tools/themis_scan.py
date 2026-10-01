@@ -4,7 +4,9 @@ Purpose: walk Rust, Go, Swift, Kotlin, Java, C# and JS/TS text once, blank
 every comment and literal (keeping newlines), and collect the comments with
 their line numbers, for themis_lang.py to measure and match.
 Entry points: Scan(text, lang) with lang one of rust, go, swift, kotlin,
-java, csharp, js; its code, comments, notes, broken and line_at().
+java, csharp, js; its code, comments, notes, broken and line_at();
+legacy_comments(), a plain scanner for other languages, and
+python_comments(), which reads Python through the tokenizer.
 Invariants: standard library only, python3 3.9+; pure over the text, no file
 access, no printing, no module-level mutable state; code has the same
 length and line breaks as the text, and a literal leaves one quote mark; an
@@ -17,8 +19,10 @@ Never change without a decision: the language names and the blanking rule
 from __future__ import annotations
 
 import bisect
+import io
 import re
-from typing import List, Optional, Tuple
+import tokenize
+from typing import Dict, List, Optional, Tuple
 
 _NESTED = {"rust", "swift", "kotlin"}
 _JS_REGEX_KW = {"return", "typeof", "case", "do", "else", "in", "of", "new", "delete",
@@ -308,3 +312,55 @@ class Scan:
                 return j + 1
             j += 1
         return None
+
+
+# ---- other languages -----------------------------------------------------------
+def _find_unescaped(work: str, token: str) -> int:
+    """Like str.find, but a hit right after ':' ('//' in 'https://') isn't one."""
+    start = 0
+    while True:
+        idx = work.find(token, start)
+        if idx <= 0 or work[idx - 1] != ":":
+            return idx
+        start = idx + len(token)
+
+def legacy_comments(text: str, style: Tuple[Optional[str], Optional[Tuple[str, str]], object]) -> Dict[int, str]:
+    """Line number -> comment text (not string-aware, but good enough to
+    catch history words). Python files use python_comments() instead."""
+    line_prefix, block, _ = style
+    found: Dict[int, str] = {}
+    in_block = False
+    for number, line in enumerate(text.splitlines(), start=1):
+        work = line
+        if in_block:
+            end = work.find(block[1])
+            found[number] = work if end == -1 else work[:end]
+            if end == -1:
+                continue
+            work, in_block = work[end + len(block[1]):], False
+        line_idx = _find_unescaped(work, line_prefix) if line_prefix else -1
+        block_idx = work.find(block[0]) if block else -1
+        if line_idx == -1 and block_idx == -1:
+            continue
+        if block_idx == -1 or (line_idx != -1 and line_idx < block_idx):
+            found[number] = found.get(number, "") + work[line_idx + len(line_prefix):]
+            continue
+        end = work.find(block[1], block_idx + len(block[0]))
+        if end == -1:
+            found[number] = found.get(number, "") + work[block_idx + len(block[0]):]
+            in_block = True
+        else:
+            found[number] = found.get(number, "") + work[block_idx + len(block[0]):end]
+    return found
+
+def python_comments(text: str) -> Dict[int, str]:
+    """Via the tokenizer, so a '#' inside a string is never a false
+    comment; falls back to the generic scan if the file does not parse."""
+    found: Dict[int, str] = {}
+    try:
+        for tok in tokenize.generate_tokens(io.StringIO(text).readline):
+            if tok.type == tokenize.COMMENT:
+                found[tok.start[0]] = found.get(tok.start[0], "") + tok.string.lstrip("#")
+        return found
+    except (tokenize.TokenError, IndentationError, SyntaxError, ValueError):
+        return legacy_comments(text, ("#", None, None))

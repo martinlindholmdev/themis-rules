@@ -39,7 +39,8 @@ class RebaselineOnlyLowersTests(unittest.TestCase):
         git(self.root, "config", "user.email", "t@example.com")
         git(self.root, "config", "user.name", "t")
         (self.root / "tools").mkdir()
-        (self.root / "tools" / "themis.py").write_bytes(THEMIS.read_bytes())
+        for name in ("themis.py", "themis_lang.py", "themis_scan.py"):
+            (self.root / "tools" / name).write_bytes((THEMIS.parent / name).read_bytes())
         (self.root / "themis.json").write_text('{"version": "v3"}\n', encoding="utf-8")
         (self.root / "main.py").write_text(big(900), encoding="utf-8")
         self.assertEqual(themis(self.root, "rebaseline").returncode, 0)  # first baseline: nothing to raise

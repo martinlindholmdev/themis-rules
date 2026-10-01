@@ -578,12 +578,21 @@ jobs:
           # tools/themis.py (on a PR, or pushed straight to a branch)
           # checks itself and passes. check --range also scans every
           # added line between BASE and HEAD for secrets, on push too.
+          # the checker's sibling files come from BASE too, side by side
+          # under the same names, so the base checker finds its own.
+          mkdir -p "$RUNNER_TEMP/themis_base"
           if git cat-file -e "$BASE:tools/themis.py" 2>/dev/null; then
-            git show "$BASE:tools/themis.py" > "$RUNNER_TEMP/themis_base.py"
+            for f in themis.py themis_lang.py themis_scan.py; do
+              if git cat-file -e "$BASE:tools/$f" 2>/dev/null; then
+                git show "$BASE:tools/$f" > "$RUNNER_TEMP/themis_base/$f"
+              fi
+            done
           else
-            cp tools/themis.py "$RUNNER_TEMP/themis_base.py"
+            for f in themis.py themis_lang.py themis_scan.py; do
+              if [ -f "tools/$f" ]; then cp "tools/$f" "$RUNNER_TEMP/themis_base/$f"; fi
+            done
           fi
-          python3 "$RUNNER_TEMP/themis_base.py" check --range "$BASE...$HEAD"
+          python3 "$RUNNER_TEMP/themis_base/themis.py" check --range "$BASE...$HEAD"
 """
 
 def plan_ci_workflow(root: Path) -> List[Change]:

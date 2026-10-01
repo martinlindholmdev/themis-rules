@@ -5,7 +5,9 @@ every comment (string- and nesting-aware), measure each function's length
 in lines, mark Rust test modules, spot generated files, match history words
 in comments, and clamp per-extension limits to the hard limits.
 Entry points: EXTENSIONS, functions(), comments(), test_spans(),
-generated(), history_hits(), clamp_limits().
+generated(), generated_honoured(), history_hits(), measure_text(),
+clamp_limits(), lang_violations(); legacy_comments() and
+python_comments() are re-exported from themis_scan.
 Invariants: standard library only, python3 3.9+; pure functions over text,
 with no file or git access, no printing and no module-level mutable state;
 odd input yields notes, never an exception; time is linear in the file plus
@@ -23,6 +25,7 @@ generated-file marker table.
 from __future__ import annotations
 
 import importlib.util
+import json
 import re
 import sys
 from pathlib import Path
@@ -36,6 +39,8 @@ _spec = importlib.util.spec_from_file_location("themis_scan", _SCAN_PATH)
 _scan_module = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(_scan_module)
 Scan = _scan_module.Scan
+legacy_comments = _scan_module.legacy_comments
+python_comments = _scan_module.python_comments
 
 _FAMILY = {
     ".rs": "rust", ".go": "go", ".swift": "swift", ".kt": "kotlin", ".kts": "kotlin",
@@ -480,7 +485,7 @@ def generated(text: str) -> Optional[str]:
     """The generated-file marker found in the first 10 comment lines before
     any code, else None."""
     taken, in_block = [], False
-    for raw in text.splitlines():
+    for raw in text[:20000].splitlines():
         line = raw.strip()
         if in_block:
             in_block = "*/" not in line
@@ -495,6 +500,14 @@ def generated(text: str) -> Optional[str]:
             break
     m = _GENERATED.search("\n".join(taken))
     return m.group()[:80] if m else None
+
+
+def generated_honoured(text: str, base_text: Optional[str]) -> Tuple[Optional[str], bool]:
+    """(marker, honoured): a marker is honoured only when the version of the
+    file at the base commit carried one too, so adding a marker to an
+    existing file, or to a new or renamed one, never exempts it."""
+    marker = generated(text)
+    return marker, marker is not None and base_text is not None and generated(base_text) is not None
 
 
 # ---- history words -----------------------------------------------------------
@@ -561,3 +574,49 @@ def clamp_limits(config_limits: object, ext: str, file_max: int, function_max: i
         return min(hard, v) if ok else hard
 
     return pick("file", file_max), pick("function", function_max)
+
+
+# ---- baseline ratchet for these languages ----------------------------------
+def measure_text(text: str, ext: str, pattern: "re.Pattern[str]") -> Tuple[Dict[str, int], int]:
+    """(function sizes, history line count) of one file's text."""
+    return functions(text, ext)[0], len(history_hits(comments(text, ext), pattern))
+
+
+def lang_violations(old_text: str, new_text: str, base_measure) -> List[str]:
+    """Entries of a `lang` baseline section (given as baseline JSON) that
+    are new or higher than in the old one and not backed by the base
+    commit: base_measure(path) returns what measure_text gives for the base
+    version, or None when the file is absent there. Lowering and removing
+    are always fine."""
+    def section(text: str) -> dict:
+        try:
+            return json.loads(text).get("lang", {})
+        except (json.JSONDecodeError, AttributeError):
+            return {}
+
+    old, new = section(old_text), section(new_text)
+    problems: List[str] = []
+    cache: Dict[str, object] = {}
+
+    def base(path: str):
+        if path not in cache:
+            cache[path] = base_measure(path)
+        return cache[path]
+
+    for path, funcs in new.get("functions", {}).items():
+        for name, size in funcs.items():
+            before = old.get("functions", {}).get(path, {}).get(name)
+            if before is not None and size <= before:
+                continue
+            got = base(path)
+            if got is None or got[0].get(name, 0) < size:
+                problems.append("lang functions %s/%s: %s is not backed by the base commit"
+                                % (path, name, size))
+    for path, count in new.get("history_words", {}).items():
+        before = old.get("history_words", {}).get(path)
+        if before is not None and count <= before:
+            continue
+        got = base(path)
+        if got is None or got[1] < count:
+            problems.append("lang history_words %s: %s is not backed by the base commit" % (path, count))
+    return problems
