@@ -53,7 +53,7 @@ _DIRECTIVE_WORDS = {"if", "ifdef", "ifndef", "else", "elif", "elseif", "endif", 
                     "endregion", "pragma", "define", "undef", "line", "nullable", "warning", "error"}
 _NON_NEWLINE = re.compile(r"[^\n]")
 _REGEX_MAX = 5000
-_IDENT_MAX = 256
+_BACKTICK_END = re.compile("[`\n]")
 _HASH_RUN = re.compile("#*")
 
 
@@ -214,8 +214,8 @@ class Scan:
         t, lang, c = self.t, self.lang, self.t[i]
         start, j = i, None
         if c == "`" and lang in ("kotlin", "swift"):           # `identifier`, kept as code
-            end = t.find("`", i + 1, min(self.n, i + _IDENT_MAX))
-            return end + 1 if end != -1 and "\n" not in t[i + 1:end] else i + 1
+            m = _BACKTICK_END.search(t, i + 1)
+            return m.end() if m and m.group() == "`" else i + 1
         if lang == "rust":
             j = self.rust_literal(i)
         elif lang == "swift":

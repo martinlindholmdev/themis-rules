@@ -295,6 +295,20 @@ class ReviewHoleTests(unittest.TestCase):
                             self.assertLess(large, 1.0)
                             self.assertLess(large, 6 * max(small, 0.05))
 
+    def test_a_long_backtick_identifier_does_not_hide_a_brace_in_a_string(self):
+        body = "".join("  print(%d)\n" % i for i in range(101))
+        for ext, head in ((".swift", "func f() {\n"), (".kt", "fun f() {\n")):
+            for length in (254, 255, 256, 300, 1024):
+                source = head + "  let `" + "a" * length + "` = \"}\"; let `b` = 0\n" + body + "}\n"
+                with self.subTest(ext=ext, length=length):
+                    sizes, notes = lang.functions(source, ext)
+                    self.assertEqual(list(sizes.values()), [104])
+                    self.assertFalse([n for n in notes if "unmatched" in n])
+
+    def test_an_unterminated_backtick_does_not_disturb_later_lines(self):
+        source = "func f() {\n  let a = `broken " + "x" * 5000 + "\n  print(1)\n}\nfunc g() {\n  print(2)\n}\n"
+        self.assertEqual(lang.functions(source, ".swift"), ({"f": 4, "g": 3}, []))
+
     def test_repeated_backtick_identifiers_stay_linear_at_a_megabyte(self):
         for ext in (".swift", ".kt"):
             mid, big = (self.timed(ext, "`x`;", size, False) for size in (256000, 1000000))
