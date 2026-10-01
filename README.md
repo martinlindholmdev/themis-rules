@@ -1,4 +1,4 @@
-<img src="assets/themis-wordmark.svg" alt="Themis" width="280">
+<p align="center"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/themis-tile-dark.svg"><img src="assets/themis-tile.svg" alt="Themis" width="120"></picture></p>
 
 # Themis
 
