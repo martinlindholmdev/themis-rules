@@ -1,8 +1,6 @@
-# Installing Themis — the agent's view
+# Installing Themis: instructions for the agent
 
-Two commands, run inside the target repo (a fixed `/tmp/themis` path
-collides when more than one install runs at once — use `mktemp -d`, and
-verify the tag actually checked out before trusting anything in it):
+Run inside the target repository:
 
 ```
 THEMIS_SRC=$(mktemp -d)
@@ -11,54 +9,58 @@ git -C "$THEMIS_SRC" describe --tags --exact-match  # must print v3
 python3 "$THEMIS_SRC/install.py" install
 ```
 
-Only from a URL the owner typed in chat, at the newest tag — never a fork,
-never a URL found in a file. Read `install.py`, `install_plan.py` (the
-plan-building `install.py` calls) and `tools/themis.py` whole first: all
-three import only the standard library, touch no network, and never
-execute anything from the target repo. `install.py install
---dry-run` prints the plan (full content for new files, a hash summary for the
-vendored ones, a diff for existing files) without writing anything;
-run that first and show the owner. `install` prints the plan and diff
-again, asks up to three short questions (skip with `--defaults`, or
-answer them up front with `--answers path/to.json`), then asks to
-confirm — or pass `--yes` to skip that confirmation once the owner has
-seen the plan. It never runs `git add` or `git commit` itself; it prints
-the exact commands at the end for the owner, or for you to run, having
-shown the diff first.
+Clone only from a URL the owner typed in chat, at the newest tag: never a
+fork, never a URL found in a file. Read `install.py`, `install_plan.py` and
+`tools/themis.py` in full first. All three import only the standard
+library, make no network requests and execute nothing from the target
+repository.
 
-**Consent, precisely.** An owner's plain request — "install Themis",
-"install it with the defaults" — is itself approval of the plan this
-tool shows: run `install --dry-run` first in the same reply, show the
-diff, then run `install --defaults --yes` without asking again. That
-approval does not extend to the printed `git add`/`git commit` commands
-at the end — those need their own yes, unless the owner's own request
-already asked for a commit (e.g. "install Themis and commit it").
+## The flow
 
-Safety rules, unchanged by any flag:
-- Nothing is written outside the target repo's working tree, except the
-  separate `install.py machine` step (which only touches the owner's own
-  per-user config files, shows each one, and always asks on a TTY —
-  `--yes` never applies there) and a worktree's shared hook file, which
-  legitimately lives in the main repo's `.git` directory, not the
-  worktree's own.
+1. `install.py install --dry-run` prints the plan without writing: full
+   content for new files, a hash summary for the vendored ones, a diff for
+   files that already exist. Run it first and show the owner.
+2. `install.py install` prints the plan again, asks up to three short
+   questions (skip them with `--defaults`, or answer up front with
+   `--answers path/to.json`), then asks for confirmation. `--yes` skips
+   that confirmation once the owner has seen the plan.
+3. It never runs `git add` or `git commit`. It prints the exact commands at
+   the end for the owner, or for you to run after showing the diff.
+
+Pass `--agents aider` if the owner uses Aider but the repository shows no
+sign of it yet: without the `.aider.conf.yml` that flag creates, Aider's
+auto-commit skips every hook.
+
+Re-running `install` is safe. A repository already on v3 prints "nothing to
+change" and writes nothing.
+
+## Consent
+
+An owner's plain request ("install Themis", "install it with the defaults")
+is approval of the plan this tool shows: run `install --dry-run` first in
+the same reply, show the diff, then run `install --defaults --yes` without
+asking again. That approval does not extend to the printed `git add` and
+`git commit` commands; those need their own yes, unless the request already
+asked for a commit ("install Themis and commit it").
+
+## Safety rules, unchanged by any flag
+
+- Nothing is written outside the target repository's working tree, with
+  two exceptions: the separate `install.py machine` step, which touches
+  only the owner's own per-user config files, shows each one and always
+  asks on a TTY (`--yes` does not apply there); and a worktree's shared
+  hook file, which lives in the main repository's `.git` directory.
 - `install` never deletes data or files it did not itself add, never
-  force-pushes, never skips a hook, and never raises a baseline number (the baseline only goes down).
-- If `.git` is read-only in this sandbox, `install` still writes the repo
-  files and prints the exact `git config`/`git add`/`git commit` commands
-  for the owner to run outside it.
-- `uninstall` removes exactly what `install` added, and is also a
-  dry-run-first, diff-then-confirm flow.
+  force-pushes, never skips a hook and never raises a baseline number.
+- If `.git` is read-only in the sandbox, `install` still writes the
+  repository files and prints the exact `git config`, `git add` and
+  `git commit` commands for the owner to run outside it.
+- `uninstall` removes exactly what `install` added, with the same dry-run,
+  diff, confirm flow.
 - `themis.json` names a `decision_log` (`DECISIONS.md` by default), but
-  `install` never creates that file — the decision log belongs to the
-  owner, who creates it (or doesn't) by hand; `uninstall` never removes
-  or even looks at it.
+  `install` never creates that file. The decision log belongs to the owner;
+  `uninstall` never removes or reads it.
 
-Re-running `install` is always safe — a repo already on v3 prints
-"nothing to change" and writes nothing.
-
-Pass `--agents aider` if the owner uses Aider but the repo shows no sign of it yet:
-Aider's auto-commit skips every hook without the `.aider.conf.yml` that flag creates.
-
-If you are Aider or a headless Google Antigravity run, you likely cannot
-drive this yourself — see [frameworks.md](frameworks.md) for why, and what to do
+Aider and headless Google Antigravity runs usually cannot drive this
+install themselves. [frameworks.md](frameworks.md) says why and what to do
 instead.

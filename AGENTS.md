@@ -1,17 +1,20 @@
-# AGENTS.md — working on Themis
+# AGENTS.md: working on Themis
 
-This repo is the rules kit, and it obeys its own rules (see `RULES.md`,
-copied below between the markers, and `CONTRIBUTING.md`). Layout:
-`README.md` (what this is, for a person), `RULES.md` (the block any repo
-installs), `docs/install.md` (the agent's view of installing it elsewhere),
-`docs/frameworks.md` (the 17-surface support matrix), `tools/themis.py`
-(the vendored checker, never changed without updating every repo that
-has it), `install.py` (the commands, uninstall planners and machine writers) and
-`install_plan.py` (the install plan-building and shared mechanics —
-together with `install.py`, this repo only, never vendored), and `tests/`.
+This repository is the rules kit and obeys its own rules: the block below,
+copied from `RULES.md`, and `CONTRIBUTING.md`, which lists the two commands
+that must pass before a commit.
 
-Before committing: `python3 -m unittest discover -s tests` and
-`python3 tools/themis.py status` both clean.
+Layout:
+
+- `README.md`: what Themis is, for a person.
+- `RULES.md`: the block every repository installs.
+- `docs/install.md`: the agent's instructions for installing it elsewhere.
+- `docs/frameworks.md`: the 17-agent support matrix.
+- `tools/themis.py`: the vendored checker. Never changed without updating
+  every repository that has it.
+- `install.py` and `install_plan.py`: the commands and the plan building.
+  Run only in this repository, never vendored.
+- `tests/`: the test suite.
 
 <!-- themis v3 begin -->
 # Agent rules
