@@ -300,10 +300,38 @@ class Findings:
         self.problems: List[str] = []
         self.notes: List[str] = []
 
+class PathEscapesRepo(ValueError):
+    pass
+
+def safe_rel_path(root: Path, rel: str) -> Path:
+    """Confines an owner/agent-controlled repo-relative path (today: only
+    themis.json's baseline_path) to the repo: no control character (a
+    newline could turn a printed error into a second, executable line if
+    pasted — so this is never echoed back when it is the problem), no
+    absolute path, no '..', and no symlink component anywhere, leaf or
+    parent — even one that would resolve back inside the repo, since a
+    write through it still lands on a different real file than named."""
+    if any(ord(c) < 0x20 or ord(c) == 0x7f for c in rel):
+        raise PathEscapesRepo("a control character is not allowed in a path")
+    candidate = Path(rel)
+    if candidate.is_absolute():
+        raise PathEscapesRepo("%s: an absolute path is not allowed" % rel)
+    if ".." in candidate.parts:
+        raise PathEscapesRepo("%s: '..' is not allowed" % rel)
+    current = root
+    for part in candidate.parts:
+        current = current / part
+        if current.is_symlink():
+            raise PathEscapesRepo("%s: a symlink component is not allowed" % rel)
+    return current
+
 def load_baseline(root: Path, config: dict, ref: Optional[str] = None) -> dict:
     try:
-        text = read(root, config["baseline_path"], ref)
-    except (FileNotFoundError, subprocess.CalledProcessError):
+        if ref is None:
+            text = safe_rel_path(root, config["baseline_path"]).read_text(encoding="utf-8", errors="replace")
+        else:
+            text = read(root, config["baseline_path"], ref)
+    except (FileNotFoundError, subprocess.CalledProcessError, PathEscapesRepo):
         return {"files": {}, "functions": {}, "history_words": {}}
     return _parsed_baseline(text)
 
@@ -367,7 +395,7 @@ def fresh_baseline(measures: List[Measure]) -> dict:
             "functions": dict(sorted(functions.items())), "history_words": dict(sorted(history.items()))}
 
 def write_baseline(root: Path, config: dict, data: dict) -> None:
-    path = root / config["baseline_path"]
+    path = safe_rel_path(root, config["baseline_path"])
     path.write_text(json.dumps(data, indent=1, ensure_ascii=False) + "\n", encoding="utf-8")
 
 def baseline_ratchet_violations(head_text: str, new_text: str) -> List[str]:
@@ -416,20 +444,30 @@ def baseline_problems(root: Path, config: dict, rev: str, new_ref: str, diff_arg
             % (config["baseline_path"], "; ".join(violations))]
 
 def diff_additions(root: Path, *diff_args: str) -> List[Tuple[str, int, str]]:
+    """An added line whose own content is "++ something" is rendered by
+    git as "+++ something" — identical to a real file-header line — so a
+    header is only ever recognised outside a hunk (`in_hunk`, reset by
+    the unambiguous "diff --git" boundary git puts before every file);
+    inside a hunk, that same text is correctly an addition, not a path."""
     out = _git(root, "diff", *diff_args, "-U0", "--no-color", "--diff-filter=ACMR")
     additions: List[Tuple[str, int, str]] = []
     path: Optional[str] = None
     next_line = 1
+    in_hunk = False
     for line in out.splitlines():
-        if line.startswith("+++ "):
+        if line.startswith("diff --git "):
+            path, in_hunk = None, False
+            continue
+        if not in_hunk and line.startswith("+++ "):
             header = line[4:]
             path = None if header == "/dev/null" else header[2:]
             continue
         if line.startswith("@@"):
             match = re.search(r"\+(\d+)", line)
             next_line = int(match.group(1)) if match else 1
+            in_hunk = True
             continue
-        if line.startswith("+"):
+        if in_hunk and line.startswith("+"):
             if path is not None:
                 additions.append((path, next_line, line[1:]))
             next_line += 1
@@ -584,7 +622,10 @@ def run_range(root: Path, config: dict, range_arg: str) -> int:
         print("themis: --range needs the form A...B (e.g. origin/main...HEAD)")
         return 2
     a, b = range_arg.split("...", 1)
-    span = a + "..." + b
+    # a direct two-dot diff, not three-dot/merge-base: A is sometimes a
+    # raw tree (CI's empty-tree fallback for a branch with no earlier
+    # commit), and merge-base requires two commits.
+    span = a + ".." + b
     config, config_changed = enforcement_config(root, config, a, (span,))
     notes: List[str] = list(_self_change_note(root, (span,)))
     if config_changed:
@@ -625,7 +666,11 @@ def main(argv: Optional[List[str]] = None) -> int:
         paths = tree_files(root, config)
         baseline = load_baseline(root, config)
         _, measures = run_checks(root, paths, None, baseline, config)
-        write_baseline(root, config, fresh_baseline(measures))
+        try:
+            write_baseline(root, config, fresh_baseline(measures))
+        except PathEscapesRepo as exc:
+            print("themis: refusing to write the baseline — %s" % exc)
+            return 1
         print("themis: baseline written to %s" % config["baseline_path"])
         return 0
     if args.range:
