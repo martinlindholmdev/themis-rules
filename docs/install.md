@@ -25,7 +25,10 @@ repository.
    `--answers path/to.json`), then asks for confirmation. `--yes` skips
    that confirmation once the owner has seen the plan.
 3. It never runs `git add` or `git commit`. It prints the exact commands at
-   the end for the owner, or for you to run after showing the diff.
+   the end for the owner, or for you to run after showing the diff. A commit
+   that contains only Themis's own files prints "0 staged source files;
+   nothing to check"; when another measured file is staged with them, the
+   hook also prints an owner-only note for each changed tools file.
 
 Pass `--agents aider` if the owner uses Aider but the repository shows no
 sign of it yet: without the `.aider.conf.yml` that flag creates, Aider's

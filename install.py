@@ -79,7 +79,9 @@ def do_install(root: Path, args: argparse.Namespace) -> int:
     for failure in failures:
         print("note: " + failure)
     PLAN.run_verified_status(root)
-    PLAN.print_commit_instructions(root, changes, "Install Themis", exclude=failed_rels)
+    upgrading = any(n.startswith("upgrading Themis") for n in notes)
+    message = "Upgrade Themis to %s" % THEMIS.SCRIPT_VERSION if upgrading else "Install Themis"
+    PLAN.print_commit_instructions(root, changes, message, exclude=failed_rels)
     return 0
 
 # -------------------------------------------------------------- uninstall

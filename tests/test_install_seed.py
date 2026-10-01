@@ -112,6 +112,7 @@ class SeedTests(unittest.TestCase):
         self.assertIn("upgrading Themis v3 to v3.1", dry.stdout)
         done = self.install(repo, "--yes")
         self.assertEqual(done.returncode, 0, done.stdout + done.stderr)
+        self.assertIn("Upgrade Themis to v3.1", done.stdout)
         baseline = self.baseline(repo)
         self.assertEqual(baseline["functions"], {"m.py": {"f": 112}})
         self.assertEqual(baseline["history_words"], {})

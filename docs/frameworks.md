@@ -71,7 +71,10 @@ agent's user-level config file, its permission layer, and the sources.
 - Hook skip: not documented.
 - Permissions: `permission.bash` pattern rules (approximate matching).
 - Themis: native read, nothing extra; an optional deny rule in
-  `opencode.json` (below).
+  `opencode.json` (below). Run headless with the kit outside the repository,
+  the agent auto-denies reading it; allow the kit directory only with the
+  `external_directory` permission, for example through `OPENCODE_PERMISSION`.
+  Interactive use needs nothing.
 - Sources: opencode.ai/docs/rules, opencode.ai/docs/permissions.
 
 ### Goose
@@ -193,6 +196,9 @@ replacement for personal-account Gemini CLI users since the change above.
   source, unverified against primary docs).
 - Themis: native read, nothing extra to write. Because that flag can remove
   every local hook on this client, the CI backstop is the real guarantee.
+  Run headless with the kit outside the repository, the agent auto-denies
+  reading it; allow the kit directory only with a `read_file(<kit
+  directory>)` rule. Interactive use needs nothing.
 - Headless runs need several allow rules, not one. Measured on a test
   machine on 2026-10-01, not taken from Google's documentation: an
   unattended `agy -p "install Themis..."` only got through once its
@@ -232,6 +238,7 @@ replacement for personal-account Gemini CLI users since the change above.
   prompt has been observed making Aider install Playwright, Chromium and
   pandoc to fetch and render the URL. Avoid `--yes-always` when pasting a
   Themis install URL into an Aider prompt, or pass `--no-detect-urls`.
+  Headless runs need `--no-show-release-notes`.
 - Sources: aider.chat/docs/usage/conventions.html, aider.chat/docs/git.html.
 
 ### Cline
