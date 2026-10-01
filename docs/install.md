@@ -54,5 +54,5 @@ Re-running `install` is always safe — a repo already on v3 prints
 "nothing to change" and writes nothing.
 
 If you are Aider or a headless Google Antigravity run, you likely cannot
-drive this yourself — see `docs/frameworks.md` for why, and what to do
+drive this yourself — see [frameworks.md](frameworks.md) for why, and what to do
 instead.
