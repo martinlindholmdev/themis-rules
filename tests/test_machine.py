@@ -8,6 +8,7 @@ Never change without a decision: which three agents this test simulates.
 """
 
 import importlib.util
+import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -22,8 +23,13 @@ spec.loader.exec_module(install)
 
 class MachineTableTests(unittest.TestCase):
     def test_table_paths_are_built_from_the_given_home(self):
-        home = Path("/fake/home")
-        table = dict((name, path) for name, _, path in install.machine_table(home))
+        # some CI runners set XDG_CONFIG_HOME themselves; this test is
+        # about the HOME-relative default, so it must not inherit that.
+        env = dict(os.environ)
+        env.pop("XDG_CONFIG_HOME", None)
+        with mock.patch.dict("os.environ", env, clear=True):
+            home = Path("/fake/home")
+            table = dict((name, path) for name, _, path in install.machine_table(home))
         self.assertEqual(table["Claude Code"], home / ".claude" / "rules" / "themis.md")
         self.assertEqual(table["Goose"], home / ".config" / "goose" / ".goosehints")
 

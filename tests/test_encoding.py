@@ -54,7 +54,10 @@ class GitDecodingTests(unittest.TestCase):
 
         with mock.patch("subprocess.run", side_effect=fake):
             out = themis.git_root()
-        self.assertEqual(str(out), "/repo/café")
+        # compare as Path, not str: Path("/repo/café") renders with
+        # backslashes on Windows, which a literal forward-slash string
+        # would never match even when decoding is correct.
+        self.assertEqual(out, Path("/repo/café"))
 
 
 if __name__ == "__main__":

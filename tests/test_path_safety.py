@@ -37,7 +37,9 @@ class SafePathTests(unittest.TestCase):
             tmp = Path(tmp)
             root = tmp / "repo"
             root.mkdir()
-            (root / "link.txt").symlink_to(tmp / "outside.txt")
+            target = tmp / "outside.txt"
+            target.write_text("x", encoding="utf-8")  # must exist: a dangling
+            (root / "link.txt").symlink_to(target)     # link resolves oddly on Windows
             with self.assertRaises(install.PathEscapesRepo):
                 install.safe_path(root, "link.txt")
 

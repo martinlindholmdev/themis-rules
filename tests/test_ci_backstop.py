@@ -14,7 +14,9 @@ must track whatever CI_WORKFLOW actually references.
 """
 
 import importlib.util
+import os
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -26,6 +28,32 @@ ROOT = Path(__file__).resolve().parents[1]
 spec = importlib.util.spec_from_file_location("install", ROOT / "install.py")
 install = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(install)
+
+
+def find_real_bash():
+    """On Windows, the first `bash` on PATH is often a WSL launcher stub
+    (System32\\bash.exe) that fails with no distributions installed —
+    never the CI_WORKFLOW's real bash (the generated workflow only ever
+    runs on ubuntu-latest). Prefer Git for Windows' own bash; return None
+    if no bash that actually runs is found, so the test can skip cleanly
+    instead of failing on an environment quirk the shipped workflow never
+    hits."""
+    candidates = []
+    found = shutil.which("bash")
+    if found:
+        candidates.append(found)
+    if os.name == "nt":
+        for program_files in (os.environ.get("ProgramFiles"), os.environ.get("ProgramFiles(x86)")):
+            if program_files:
+                candidates.append(str(Path(program_files) / "Git" / "bin" / "bash.exe"))
+                candidates.append(str(Path(program_files) / "Git" / "usr" / "bin" / "bash.exe"))
+    for candidate in candidates:
+        if not Path(candidate).is_file():
+            continue
+        probe = subprocess.run([candidate, "-c", "echo ok"], capture_output=True, text=True)
+        if probe.returncode == 0 and probe.stdout.strip() == "ok":
+            return candidate
+    return None
 
 
 def extract_pr_script(workflow_text: str) -> str:
@@ -47,6 +75,11 @@ def git(repo, *args):
 
 
 class CiBackstopTests(unittest.TestCase):
+    def setUp(self):
+        self.bash = find_real_bash()
+        if not self.bash:
+            self.skipTest("no working bash found (the generated workflow only ever runs on ubuntu-latest)")
+
     def test_a_pr_that_neuters_tools_themis_py_is_still_caught(self):
         script = extract_pr_script(install.CI_WORKFLOW)
         with tempfile.TemporaryDirectory() as tmp:
@@ -85,7 +118,7 @@ class CiBackstopTests(unittest.TestCase):
                 "GITHUB_SHA": head_sha,
                 "RUNNER_TEMP": str(runner_temp),
             }
-            result = subprocess.run(["bash", "-c", script], cwd=str(repo), env=env,
+            result = subprocess.run([self.bash, "-c", script], cwd=str(repo), env=env,
                                      capture_output=True, text=True)
             self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
             self.assertIn("looks like an OpenAI-shaped key", result.stdout)
@@ -128,7 +161,7 @@ class CiBackstopTests(unittest.TestCase):
                 "GITHUB_SHA": head_sha,
                 "RUNNER_TEMP": str(runner_temp),
             }
-            result = subprocess.run(["bash", "-c", script], cwd=str(repo), env=env,
+            result = subprocess.run([self.bash, "-c", script], cwd=str(repo), env=env,
                                      capture_output=True, text=True)
             self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
             self.assertIn("looks like an OpenAI-shaped key", result.stdout)
