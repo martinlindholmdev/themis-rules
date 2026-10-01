@@ -261,6 +261,19 @@ class ReviewHoleTests(unittest.TestCase):
                 sizes, _ = lang.functions(template % BODY, ext)
                 self.assertGreater(sizes.get(key, 0), 100)
 
+    def test_slash_scanning_is_linear_and_unchanged(self):
+        def timed(size):
+            source = "/ " * (size // 2 // 3 * 3 + 2) + ";\n"
+            start = time.time()
+            lang.analyse(source, ".js")
+            return time.time() - start
+        small, large = timed(32000), timed(128000)
+        self.assertLess(large, 1.0)
+        self.assertLess(large, 6 * max(small, 0.02))
+        sample = "const r = /[/]x/g, q = a / b / c; // note\nreturn /y/.test(q)\n"
+        scan = lang.Scan(sample, "js")
+        self.assertEqual(scan.code, 'const r = "     g, q = a / b / c;        \nreturn "  .test(q)\n')
+
     def test_rust_array_types_in_signatures_are_measured(self):
         cases = ["fn key() -> [u8; 32] {\n%s\n}\n", "fn key(p: [bool; 2]) {\n%s\n}\n",
                  "fn key() -> Result<Zeroizing<[u8; 32]>, E> {\n%s\n}\n",

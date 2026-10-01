@@ -10,7 +10,9 @@ python_comments(), which reads Python through the tokenizer.
 Invariants: standard library only, python3 3.9+; pure over the text, no file
 access, no printing, no module-level mutable state; code has the same
 length and line breaks as the text, and a literal leaves one quote mark; an
-unterminated literal is not a literal; a RecursionError from absurd nesting
+unterminated literal is not a literal; a regex literal over 5,000
+characters is not read as one; every character is walked a bounded number of
+times, however many slashes a line holds; a RecursionError from absurd nesting
 sets broken instead of raising; comments nest in Rust, Swift and Kotlin.
 Never change without a decision: the language names and the blanking rule
 (newlines kept, offsets unchanged), which every line number depends on.
@@ -47,6 +49,7 @@ _DIRECTIVE = re.compile(r"[ \t]*#[ \t]*(\w+)")
 _DIRECTIVE_WORDS = {"if", "ifdef", "ifndef", "else", "elif", "elseif", "endif", "region",
                     "endregion", "pragma", "define", "undef", "line", "nullable", "warning", "error"}
 _NON_NEWLINE = re.compile(r"[^\n]")
+_REGEX_MAX = 5000
 
 
 class Scan:
@@ -60,6 +63,7 @@ class Scan:
         self.comments: List[Tuple[int, str]] = []
         self.notes: List[str] = []
         self.broken = False
+        self.skip: Dict[int, int] = {}
         self.starts = [0] + [m.end() for m in re.finditer("\n", text)]
         if lang in ("csharp", "swift"):
             self.blank_directives()
@@ -163,17 +167,36 @@ class Scan:
         self.blank(i, j)
         return j
 
+    def last_significant(self, j: int) -> int:
+        """Index of the nearest code character at or before j that is neither
+        blanked nor whitespace, else -1. Skipped runs are compressed into
+        self.skip, so each character is walked once however many slashes
+        ask: a blanked character never becomes code again."""
+        path = []
+        while j >= 0:
+            nxt = self.skip.get(j)
+            if nxt is not None:
+                path.append(j)
+                j = nxt
+            elif self.keep[j] and not self.t[j].isspace():
+                break
+            else:
+                path.append(j)
+                j -= 1
+        for x in path:
+            self.skip[x] = j
+        return j
+
     def prev_code(self, i: int) -> Tuple[str, str]:
-        """(previous non-space code char, word ending there)."""
-        j = i - 1
-        while j >= 0 and (not self.keep[j] or self.t[j].isspace()):
-            j -= 1
+        """(previous non-space code char, word ending there; at most the
+        last nine characters of a longer one, which no keyword matches)."""
+        j = self.last_significant(i - 1)
         if j < 0:
             return "", ""
         if j + 1 < i and not self.keep[j + 1] and not self.t[j + 1].isspace():
             return ")", ""                                     # a literal ends an operand
         k = j
-        while k >= 0 and self.keep[k] and (self.t[k].isalnum() or self.t[k] in "_$"):
+        while k >= 0 and j - k < 9 and self.keep[k] and (self.t[k].isalnum() or self.t[k] in "_$"):
             k -= 1
         return self.t[j], self.t[k + 1:j + 1]
 
@@ -300,7 +323,8 @@ class Scan:
         if p == "<" or (p and (p.isalnum() or p in "_$)]}") and word not in _JS_REGEX_KW):
             return None                                        # closing tag or division
         t, j, in_class = self.t, i + 1, False
-        while j < self.n and t[j] != "\n":
+        end = min(self.n, i + _REGEX_MAX)
+        while j < end and t[j] != "\n":
             if t[j] == "\\":
                 j += 2
                 continue

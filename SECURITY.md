@@ -52,6 +52,15 @@ has no release SLA; expect an acknowledgement, not a guaranteed fix date.
 - Force-pushes, deletes data, or skips a hook on your behalf.
 - Raises a size baseline, for anyone. `rebaseline` refuses to raise any
   number, and the hook and the CI range check refuse a commit that does.
+  The one addition allowed is a `lang` entry that the base commit's own
+  content already measures at least as large; it records what existed.
+
+## Trust boundary
+
+The local checker files, git and python are trusted: anything that can
+edit them can edit the check. The independent boundary is the CI backstop
+running the protected base copies of the checker files, so a change cannot
+weaken the check it is judged by.
 
 ## For repositories that install Themis
 

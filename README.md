@@ -144,8 +144,10 @@ with sources and check dates, is in [docs/frameworks.md](docs/frameworks.md).
 When a GitHub remote is present, `install` offers
 `.github/workflows/themis.yml`: a job named `themis` that runs
 `themis.py check --range <base>...<head>` on every pull request and push.
-It always runs the base commit's own copies of the three checker files, so
-a change cannot rewrite the checker to pass itself. A branch with no earlier commit
+It runs the base commit's own copies of the three checker files, so a
+change cannot rewrite the checker to pass itself; when the base commit has
+no checker at all, the first introduction runs the checked-out copy, so
+that first change needs the owner's own review. A branch with no earlier commit
 is ranged from git's empty tree, so every line is still scanned for
 secrets. Mark the job a required status check in the repository's branch
 protection settings; without that it is advice, not a backstop. See
