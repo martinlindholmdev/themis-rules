@@ -101,7 +101,7 @@ def _strip_marked_lines(text: Optional[str], marker: str) -> Optional[str]:
 
 def plan_remove_core_files(root: Path) -> List[Change]:
     changes = []
-    for rel in ("tools/themis.py", THEMIS.CONFIG_NAME, "themis-baseline.json"):
+    for rel in PLAN.TOOL_FILES + (THEMIS.CONFIG_NAME, "themis-baseline.json"):
         text = read_text(root, rel)
         if text is not None:
             changes.append(Change(rel, text, None))

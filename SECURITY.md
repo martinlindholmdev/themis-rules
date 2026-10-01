@@ -9,7 +9,8 @@ has no release SLA; expect an acknowledgement, not a guaranteed fix date.
 
 ## What Themis does
 
-- `tools/themis.py` is standard-library Python only: no network access, no
+- `tools/themis.py`, `tools/themis_lang.py` and `tools/themis_scan.py` are
+  standard-library Python only: no network access, no
   third-party dependencies. It writes to exactly one file, the baseline,
   and only under `rebaseline`, which can only lower it.
 - It scans staged diffs and commit ranges for secret-shaped strings
@@ -20,6 +21,17 @@ has no release SLA; expect an acknowledgement, not a guaranteed fix date.
   positive with `themis: allow-secret` on that line.
 - A matched secret is reported by file and line number. The matched text is
   never printed, logged or included in any message.
+- `exempt_files` in `themis.json` is the owner's bypass of the size,
+  function and history checks for the files it names. It never skips the
+  secret scan, and the list enforced is the one already committed at the
+  base commit, so a change cannot exempt itself.
+- A generated-file marker (in a file's first ten comment lines) exempts the
+  file from the size, function and history checks only when the version of
+  that file at the base commit carried a marker too. A marker added to an
+  existing, new or renamed file is reported and the file is measured. The
+  secret scan never skips a file.
+- A new or raised `lang` baseline entry is accepted only when the base
+  commit's own version of the file measures at least that number.
 - `install.py` never executes code from the repository it installs into:
   not an old checker it replaces, not a hook file it edits around. It never
   runs `git commit`; it prints the command. It makes no network requests.

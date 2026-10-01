@@ -37,7 +37,7 @@ def load_themis():
 THEMIS = load_themis()
 #: matches a themis marker (THEMIS.MARKER) as well as an older agent-rules one,
 #: so an upgrade can find and replace a v1/v2 block, not just a v3 one.
-ANY_MARKER = re.compile(r"<!--\s*(agent-rules|themis)\s+(v\d+)\s+begin\s*-->")
+ANY_MARKER = re.compile(r"<!--\s*(agent-rules|themis)\s+(v\d+(?:\.\d+)*)\s+begin\s*-->")
 
 def read_text(root: Path, rel: str) -> Optional[str]:
     """A tracked file that is itself a symlink — or sits under a
@@ -104,7 +104,8 @@ class Change:
 #: files whose content is always byte-identical to this kit's own copy;
 #: a new one is proven by hash instead of scrolling ~600 lines of diff
 #: past the owner.
-VENDORED_FILES = ("tools/themis.py", "tools/hooks/pre-commit", ".github/workflows/themis.yml")
+TOOL_FILES = ("tools/themis.py", "tools/themis_lang.py", "tools/themis_scan.py")
+VENDORED_FILES = TOOL_FILES + ("tools/hooks/pre-commit", ".github/workflows/themis.yml")
 
 def _redact_secrets(diff_lines: List[str]) -> List[str]:
     """A diff of a config file an owner already has (.aider.conf.yml, a
@@ -132,8 +133,8 @@ def print_plan(changes: List[Change]) -> None:
                 # of scrolling a ~600-line diff past the owner.
                 lines = change.new.count("\n") or 1
                 digest = hashlib.sha256(change.new.encode("utf-8")).hexdigest()
-                print("write   %s (%d line%s, identical to Themis v3, sha256 %s)"
-                      % (change.rel, lines, "" if lines == 1 else "s", digest))
+                print("write   %s (%d line%s, identical to Themis %s, sha256 %s)"
+                      % (change.rel, lines, "" if lines == 1 else "s", THEMIS.SCRIPT_VERSION, digest))
             else:
                 # everything else this install creates (the AGENTS.md
                 # block, themis.json, CLAUDE.md, the fresh baseline) is
@@ -195,12 +196,13 @@ def rules_block() -> str:
     end = rules.index("<!-- themis %s end -->" % THEMIS.SCRIPT_VERSION) + len("<!-- themis %s end -->" % THEMIS.SCRIPT_VERSION)
     return rules[start:end] + "\n"
 
-def plan_core_files(root: Path) -> List[Change]:
+def plan_core_files(root: Path, notes: Optional[List[str]] = None) -> List[Change]:
     changes = []
-    src_checker = (HERE / "tools" / "themis.py").read_text(encoding="utf-8")
-    cur_checker = read_text(root, "tools/themis.py")
-    if cur_checker != src_checker:
-        changes.append(Change("tools/themis.py", cur_checker, src_checker))
+    notes = [] if notes is None else notes
+    for rel in TOOL_FILES:
+        source, current = (HERE / rel).read_text(encoding="utf-8"), read_text(root, rel)
+        if current != source:
+            changes.append(Change(rel, current, source))
     if (root / "tools" / "agent_rules.py").exists():
         changes.append(Change("tools/agent_rules.py", read_text(root, "tools/agent_rules.py"), None))
 
@@ -227,6 +229,7 @@ def plan_core_files(root: Path) -> List[Change]:
     data.setdefault("extra_history_words", [])
     data.setdefault("extra_extensions", [])
     data.setdefault("decision_log", "DECISIONS.md")
+    previous = data.get("version")
     data["version"] = THEMIS.SCRIPT_VERSION
     new_config = json.dumps(data, indent=1, ensure_ascii=False) + "\n"
     if config_text != new_config:
@@ -237,22 +240,68 @@ def plan_core_files(root: Path) -> List[Change]:
     legacy_baseline = root / "agent-rules-baseline.json"
     new_baseline = root / data["baseline_path"]
     legacy_baseline_text = read_text(root, "agent-rules-baseline.json")
+    current_text = read_text(root, data["baseline_path"])
     if legacy_baseline_text is not None and legacy_baseline != new_baseline and not new_baseline.exists():
-        changes.append(Change(data["baseline_path"], None, legacy_baseline_text))
+        changes.append(Change(data["baseline_path"], None, seeded_baseline(root, data, legacy_baseline_text, notes)))
         changes.append(Change("agent-rules-baseline.json", legacy_baseline_text, None))
     elif not legacy_baseline.exists() and not new_baseline.exists():
-        # a brand-new install: today's sizes become the baseline so the
-        # first commit isn't refused for pre-existing sizes — shown in
-        # the plan like everything else, never a silent write after the
-        # owner has already said yes.
-        changes.append(Change(data["baseline_path"], None, fresh_baseline_text(root, data)))
+        # a brand-new install: shown in the plan like everything else,
+        # never a silent write after the owner has already said yes.
+        changes.append(Change(data["baseline_path"], None, seeded_baseline(root, data, None, notes)))
+    elif current_text is not None and previous != THEMIS.SCRIPT_VERSION:
+        seeded = seeded_baseline(root, data, current_text, notes)
+        if seeded != current_text:
+            changes.append(Change(data["baseline_path"], current_text, seeded))
     return changes
 
-def fresh_baseline_text(root: Path, config: dict) -> str:
-    paths = THEMIS.tree_files(root, config)
-    baseline = THEMIS.load_baseline(root, config)
-    _, measures = THEMIS.run_checks(root, paths, None, baseline, config)
-    return json.dumps(THEMIS.fresh_baseline(measures), indent=1, ensure_ascii=False) + "\n"
+EMPTY_BASELINE = {"files": {}, "functions": {}, "history_words": {}}
+
+def _measures(root: Path, config: dict, ref: Optional[str], seven: bool) -> list:
+    """Measures of the tree at `ref` (None: the working tree, untracked
+    files included), for the seven-language paths or for all the others."""
+    try:
+        paths = THEMIS.tree_files(root, config, ref=ref)
+    except subprocess.CalledProcessError:
+        return []  # no commit yet: nothing is committed to seed from
+    paths = [p for p in paths if (Path(p).suffix in THEMIS.lang.EXTENSIONS) == seven]
+    return THEMIS.run_checks(root, paths, ref, EMPTY_BASELINE, config)[1]
+
+def _lowered(old: dict, new: dict) -> dict:
+    """The entries of `old` that `new` still has, each at the lower number."""
+    out: dict = {}
+    for key, value in old.items():
+        if key in new:
+            kept = _lowered(value, new[key]) if isinstance(value, dict) else min(value, new[key])
+            if kept != {}:
+                out[key] = kept
+    return out
+
+def seeded_baseline(root: Path, config: dict, existing: Optional[str], notes: List[str]) -> str:
+    """The baseline an install or upgrade writes. The seven-language
+    section comes from HEAD's committed content only; the other sections
+    come from the working tree, and an existing baseline is only lowered:
+    its entries for the seven-language paths are dropped, the rest never
+    rise."""
+    head = _measures(root, config, "HEAD", True)
+    fresh = THEMIS.fresh_baseline(_measures(root, config, None, False) + head)
+    result = fresh
+    if existing is not None:
+        try:
+            old = json.loads(existing)
+        except json.JSONDecodeError:
+            return existing
+        result = dict(old)
+        for section in ("files", "functions", "history_words"):
+            result[section] = _lowered(old.get(section, {}), fresh[section])
+        result["lang"] = fresh["lang"]
+    seeded = {(m.path, n): s for m in head for n, s in m.functions.items()}
+    pending = sorted("%s: %s" % (m.path, n) for m in _measures(root, config, None, True)
+                     for n, s in m.functions.items()
+                     if s > m.function_limit and seeded.get((m.path, n), 0) < s)
+    if pending:
+        notes.append("not seeded, because they are not in HEAD's committed content: %s%s; "
+                     "commit or split them" % (", ".join(pending[:5]), " ..." if len(pending) > 5 else ""))
+    return json.dumps(result, indent=1, ensure_ascii=False) + "\n"
 
 def _replace_block(text: str, family: str, old_version: str, block: str) -> str:
     """Replaces an agent-rules v1/v2 (or an older themis) marked block in
@@ -607,17 +656,26 @@ def plan_ci_workflow(root: Path) -> List[Change]:
 
 def build_install_plan(root: Path, args: argparse.Namespace) -> Tuple[List[Change], List[str]]:
     notes: List[str] = []
-    changes = plan_core_files(root)
+    previous = THEMIS.installed_version(root) or THEMIS.load_config(root)["version"]
+    if previous and previous != THEMIS.SCRIPT_VERSION:
+        notes.append("upgrading Themis %s to %s" % (previous, THEMIS.SCRIPT_VERSION))
+    changes = plan_core_files(root, notes)
     answers = resolve_answers(root, args)
     changes += plan_agents_md(root, answers)
     hook_changes, hook_notes = plan_hook(root)
     changes += hook_changes
     notes += hook_notes
-    adapter_changes, adapter_notes = plan_adapters(
-        root, tuple(a.strip().lower() for a in (getattr(args, "agents", None) or "").split(",")))
+    agents = tuple(a.strip().lower() for a in (getattr(args, "agents", None) or "").split(","))
+    adapter_changes, adapter_notes = plan_adapters(root, agents)
     changes += adapter_changes
     notes += adapter_notes
-    changes += plan_ci_workflow(root)
+    ci_changes = plan_ci_workflow(root)
+    changes += ci_changes
+    if any(c.old is not None for c in ci_changes):
+        notes.append("replacing .github/workflows/themis.yml: CI now takes all three checker files from the base commit")
+    notes.append("gitleaks is the complementary secret scanner: Themis's secret check covers common key shapes only")
+    if "aider" not in agents and not aider_in_use(root):
+        notes.append("If you use Aider, re-run with --agents aider")
     return changes, notes
 
 def run_verified_status(root: Path) -> None:
@@ -625,11 +683,11 @@ def run_verified_status(root: Path) -> None:
     loaded, trusted THEMIS module directly — never a subprocess running
     the copy, which would put the target's own tools/ on sys.path ahead
     of the standard library."""
-    copied = root / "tools" / "themis.py"
-    source = (HERE / "tools" / "themis.py").read_bytes()
-    if not copied.is_file() or copied.read_bytes() != source:
-        print("themis: tools/themis.py was not written as expected; not running it")
-        return
+    for rel in TOOL_FILES:
+        copied = root / rel
+        if not copied.is_file() or copied.read_bytes() != (HERE / rel).read_bytes():
+            print("themis: %s was not written as expected; not running it" % rel)
+            return
     THEMIS.print_status(root, THEMIS.load_config(root))
 
 def print_commit_instructions(root: Path, changes: List[Change], message: str,

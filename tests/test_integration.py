@@ -37,13 +37,6 @@ def commit_all(path: Path, message: str, extra_args=()) -> None:
     subprocess.run(["git", "-C", str(path), "commit", "-q", "-m", message, *extra_args], check=True)
 
 
-def vendor_siblings(repo: Path) -> None:
-    """The installer copies only themis.py; the two siblings it needs are
-    placed by hand until the installer vendors them."""
-    for name in ("themis_lang.py", "themis_scan.py"):
-        (repo / "tools" / name).write_bytes((THEMIS.parent / name).read_bytes())
-
-
 def tree_hash(path: Path) -> dict:
     out = {}
     for item in sorted(path.rglob("*")):
@@ -139,7 +132,6 @@ class InstallLifecycleTests(unittest.TestCase):
             repo = self._fresh_repo(Path(tmp))
             first = run(repo, str(INSTALL), "install", "--defaults", "--yes")
             self.assertEqual(first.returncode, 0, first.stdout + first.stderr)
-            vendor_siblings(repo)
             commit_all(repo, "install themis")
 
             second = run(repo, str(INSTALL), "install", "--defaults", "--yes")
@@ -172,7 +164,7 @@ class InstallLifecycleTests(unittest.TestCase):
 
 
 class UpgradeTests(unittest.TestCase):
-    def test_upgrade_from_agent_rules_v2_lands_on_v3_and_is_then_idempotent(self):
+    def test_upgrade_from_agent_rules_v2_lands_on_v3_1_and_is_then_idempotent(self):
         with tempfile.TemporaryDirectory() as tmp:
             repo = Path(tmp) / "repo"
             (repo / "tools").mkdir(parents=True)
@@ -195,10 +187,9 @@ class UpgradeTests(unittest.TestCase):
             self.assertFalse((repo / "agent-rules.json").exists())
             self.assertTrue((repo / "themis.json").exists())
             agents = (repo / "AGENTS.md").read_text(encoding="utf-8")
-            self.assertIn("<!-- themis v3 begin -->", agents)
+            self.assertIn("<!-- themis v3.1 begin -->", agents)
             self.assertNotIn("agent-rules v2", agents)
-            vendor_siblings(repo)
-            commit_all(repo, "upgrade to themis v3")
+            commit_all(repo, "upgrade to themis v3.1")
 
             again = run(repo, str(INSTALL), "install", "--defaults", "--yes")
             self.assertIn("nothing to change", again.stdout)

@@ -65,3 +65,19 @@ there. `tools/themis.py` and `install.py` never raise this file, and
   entry. There is no override flag and no environment variable. A file over
   the limit is split to grow. The hook and the CI range check refuse a
   commit that raises the baseline.
+- Three files are vendored (`tools/themis.py`, `tools/themis_lang.py`,
+  `tools/themis_scan.py`), because the 800-line limit applies to the kit's
+  own checker and the readers for seven languages do not fit in one file.
+- The baseline has a `lang` section for the seven languages. A new or
+  raised entry is accepted only if the base commit's own version of that
+  file, measured with the current code, gives at least that number. This
+  is not raising the baseline: it records only what already existed, so
+  no new code can be recorded as existing.
+- An anonymous function block outside any function with no binding name
+  counts its own lines, its span minus the function blocks inside it, each
+  of which is measured too; wrapping code in callbacks does not hide it.
+- A long block outside any function that is not recognised as a function
+  is a note, not a failure: a data table must not block a commit, and a
+  missed shape must not be silent.
+- C and C++ are not measured for function length yet; their macro-shaped
+  headers and preprocessor branches need a separate reader.

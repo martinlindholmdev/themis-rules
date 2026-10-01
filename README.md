@@ -17,13 +17,13 @@ From inside the target repository:
 
 ```
 THEMIS_SRC=$(mktemp -d)
-git clone --depth 1 --branch v3 https://github.com/martinlindholmdev/themis-rules "$THEMIS_SRC"
-git -C "$THEMIS_SRC" describe --tags --exact-match  # must print v3
+git clone --depth 1 --branch v3.1 https://github.com/martinlindholmdev/themis-rules "$THEMIS_SRC"
+git -C "$THEMIS_SRC" describe --tags --exact-match  # must print v3.1
 python3 "$THEMIS_SRC/install.py" install
 ```
 
 Or tell your agent: "Install Themis from
-github.com/martinlindholmdev/themis-rules at tag v3."
+github.com/martinlindholmdev/themis-rules at tag v3.1."
 
 The installer reads the repository, prints the plan and writes nothing
 until you confirm. It makes no network requests, executes nothing from the
@@ -43,19 +43,39 @@ themis: FAIL, 2 problem(s)
 
 The checker, `tools/themis.py`, runs on every commit and refuses it when:
 
-- a file is over 800 lines, or a Python function is over 100 lines, or
-  either has grown past its recorded baseline. Function length is measured
-  for Python only in v3; other languages get the file limit, the comment
-  check and the secret check, and `status` lists what it cannot measure;
+- a file is over 800 lines, or a function is over 100 lines, or either has
+  grown past its recorded baseline. Function length is measured for
+  Python, Rust, Go, Swift, Kotlin, Java, C# and JS/TS (`.js .jsx .mjs .cjs
+  .ts .tsx`); other extensions get the file limit, the comment check and
+  the secret check, and `status` lists what it cannot measure (C and C++
+  among them);
 - a comment matches a history pattern (a date, "used to", "previously",
-  "reviewer", "this session", "DO NOT MERGE") beyond its baseline count;
+  "reviewer", "this session", "DO NOT MERGE") beyond its baseline count.
+  For the seven languages comments are read string- and nesting-aware, and
+  quoted text, backtick spans, URLs and fenced code are ignored; "used to"
+  counts after a subject pronoun or as "used to be", and "previously" does
+  not count before a past participle;
 - a staged line matches a private key, a provider-shaped API token, a long
   bearer token, or a password, secret or token assignment, unless the line
   carries `themis: allow-secret`.
 
+Anonymous functions outside any function are measured: one with a binding
+name runs first line to last, an unnamed one counts its own lines and each
+function inside it is measured separately. A long block that is not
+recognised as a function is reported as a note. In Rust, the lines of a
+`#[cfg(test)] mod` are not counted against the file limit (reported as "N
+lines (P production + T test)"), and a test module over 800 lines is
+itself refused. A file whose first ten comment lines carry a generated-code
+marker is skipped for size, function and history checks only if its
+version at the base commit already carried one; the secret scan never
+skips a file.
+
 The two limits, the marker text and the secret patterns are fixed in the
-checker. `themis.json` can add history words and file extensions, and
-exempt path prefixes such as test fixtures; it cannot change a limit. The
+checker. `themis.json` can add history words and file extensions, exempt
+path prefixes such as test fixtures, tighten a limit per extension with
+`"limits": {".ts": {"file": 500, "function": 80}}` (a value above the hard
+limit is ignored), and exempt single files with `"exempt_files": {"path":
+"reason"}`, which skips the size, function and history checks only. The
 baseline only ever goes down:
 a file over a limit is split, and `rebaseline` refuses to raise any
 number. A matched secret is reported by file and line; the matched text is
@@ -75,25 +95,36 @@ not a code reviewer or a workflow framework either.
 
 ## How it works
 
-`tools/themis.py` is one standard-library Python file. It is copied into the
-target repository, not linked, so it keeps working for anyone who clones
-that repository later, with no install step and no network access. It has
-three commands:
+Three standard-library Python files are copied into the target repository,
+not linked, so they keep working for anyone who clones it later, with no
+install step and no network access: `tools/themis.py` (git, config and
+reporting), `tools/themis_lang.py` (function length, comments and history
+matching for the seven languages) and `tools/themis_scan.py` (the scanner).
+They must sit side by side; a missing one ends the run with one line. The
+checker has three commands:
 
 - `check` measures every recognised source file against
   `themis-baseline.json`. `--staged` measures the staged files and the
   staged diff (what the pre-commit hook runs). `--range A...B` measures the
   tree at `B` and scans the diff `A..B` for secrets (what CI runs).
 - `status` reports the installed version, which hook mechanism is wired up,
-  and which file extensions are and are not measured. A repository with no
-  recognised source files fails rather than reporting clean.
+  and which file extensions are and are not measured. It prints an
+  `enforcement` line: blocking when the hook is on and a CI workflow that
+  runs the checker exists, local hook only (skippable with `--no-verify`)
+  when only the hook is on, otherwise advisory. It lists generated files
+  and `exempt_files` with their reasons. A repository with no recognised
+  source files fails rather than reporting clean.
 - `rebaseline` lowers the recorded sizes to today's and drops entries for
   files that shrank under the limit or were deleted. It refuses, writing
-  nothing, if that would raise any number or add any entry. A new install
-  computes the first baseline itself and shows it in the plan.
+  nothing, if that would raise any number or add any entry. Entries for the
+  seven languages live in the baseline's `lang` section. A new or higher
+  `lang` entry is accepted only if measuring the base commit's version of
+  that file gives at least that number, so new code cannot be recorded as
+  existing. An install or upgrade computes the `lang` section from HEAD's
+  committed content only and shows it in the plan.
 
 `install.py` stays in this repository and is never copied. It writes the
-checker, the hook, `themis.json` and the rules block in `AGENTS.md`; wires
+three checker files, the hook, `themis.json` and the rules block in `AGENTS.md`; wires
 the pre-commit hook for plain git, husky, lefthook or the pre-commit
 framework; offers the per-agent adapters and the CI workflow; upgrades an
 agent-rules v1 or v2 install in place; and removes everything it added with
@@ -113,8 +144,8 @@ with sources and check dates, is in [docs/frameworks.md](docs/frameworks.md).
 When a GitHub remote is present, `install` offers
 `.github/workflows/themis.yml`: a job named `themis` that runs
 `themis.py check --range <base>...<head>` on every pull request and push.
-It always runs the base commit's own copy of the checker, so a change
-cannot rewrite the checker to pass itself. A branch with no earlier commit
+It always runs the base commit's own copies of the three checker files, so
+a change cannot rewrite the checker to pass itself. A branch with no earlier commit
 is ranged from git's empty tree, so every line is still scanned for
 secrets. Mark the job a required status check in the repository's branch
 protection settings; without that it is advice, not a backstop. See

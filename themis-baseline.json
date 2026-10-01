@@ -2,5 +2,9 @@
  "_owner": "Only this repo's owner changes this file, with a decision-log line naming why.",
  "files": {},
  "functions": {},
- "history_words": {}
+ "history_words": {},
+ "lang": {
+  "functions": {},
+  "history_words": {}
+ }
 }

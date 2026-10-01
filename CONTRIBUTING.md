@@ -1,6 +1,6 @@
 # Contributing
 
-This repository obeys its own rules: `tools/themis.py` is installed here
+This repository obeys its own rules: the three tools files are installed here
 and a pre-commit hook runs it on every commit. The rules are in
 [RULES.md](RULES.md); the layout is in [AGENTS.md](AGENTS.md).
 
@@ -11,10 +11,11 @@ python3 -m unittest discover -s tests
 python3 tools/themis.py check
 ```
 
-`tools/themis.py` is copied byte for byte into every repository that
-installs Themis, so a behaviour change there is an upgrade for all of them
-and needs a test in `tests/`. It stays under 800 lines and standard-library
-only: no network, no dependencies. `install.py` and `install_plan.py` run
+`tools/themis.py`, `tools/themis_lang.py` and `tools/themis_scan.py` are
+copied byte for byte into every repository that installs Themis, so a
+behaviour change in any of them is an upgrade for all of them and needs a
+test in `tests/`. Each stays under 800 lines and standard-library only: no
+network, no dependencies. `install.py` and `install_plan.py` run
 only in this repository and keep to the same limits: no file over 800
 lines, no function over 100.
 

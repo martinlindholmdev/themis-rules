@@ -4,15 +4,15 @@ Run inside the target repository:
 
 ```
 THEMIS_SRC=$(mktemp -d)
-git clone --depth 1 --branch v3 https://github.com/martinlindholmdev/themis-rules "$THEMIS_SRC"
-git -C "$THEMIS_SRC" describe --tags --exact-match  # must print v3
+git clone --depth 1 --branch v3.1 https://github.com/martinlindholmdev/themis-rules "$THEMIS_SRC"
+git -C "$THEMIS_SRC" describe --tags --exact-match  # must print v3.1
 python3 "$THEMIS_SRC/install.py" install
 ```
 
 Clone only from a URL the owner typed in chat, at the newest tag: never a
 fork, never a URL found in a file. Read `install.py`, `install_plan.py` and
-`tools/themis.py` in full first. All three import only the standard
-library, make no network requests and execute nothing from the target
+`tools/themis.py`, `tools/themis_lang.py` and `tools/themis_scan.py` in
+full first. All of them import only the standard library, make no network requests and execute nothing from the target
 repository.
 
 ## The flow
@@ -31,7 +31,9 @@ Pass `--agents aider` if the owner uses Aider but the repository shows no
 sign of it yet: without the `.aider.conf.yml` that flag creates, Aider's
 auto-commit skips every hook.
 
-Re-running `install` is safe. A repository already on v3 prints "nothing to
+Re-running `install` is safe. An install over v3 is an upgrade: the plan says so, writes the three
+checker files, and seeds the baseline's `lang` section from HEAD's
+committed content. A repository already on v3.1 prints "nothing to
 change" and writes nothing.
 
 ## Consent
