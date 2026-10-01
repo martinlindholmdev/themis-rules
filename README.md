@@ -43,8 +43,10 @@ themis: FAIL, 2 problem(s)
 
 The checker, `tools/themis.py`, runs on every commit and refuses it when:
 
-- a file is over 800 lines or a function over 100, or either has grown past
-  its recorded baseline;
+- a file is over 800 lines, or a Python function is over 100 lines, or
+  either has grown past its recorded baseline. Function length is measured
+  for Python only in v3; other languages get the file limit, the comment
+  check and the secret check, and `status` lists what it cannot measure;
 - a comment matches a history pattern (a date, "used to", "previously",
   "reviewer", "this session", "DO NOT MERGE") beyond its baseline count;
 - a staged line matches a private key, a provider-shaped API token, a long
