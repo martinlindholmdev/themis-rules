@@ -104,6 +104,21 @@ class WriteMachineFileTests(unittest.TestCase):
             message = install.write_machine_file("Windsurf", path, interactive=True)
             self.assertIn("skipped", message)
 
+    def test_a_symlinked_dotfile_is_rejected_before_prompting(self):
+        """Astra's re-check 'also': a symlinked dotfile was treated as
+        absent (current=None), skipping the backup, then written through —
+        it must be rejected outright, before any prompt."""
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = Path(tmp)
+            sentinel = tmp / "sentinel.md"
+            sentinel.write_text("DO NOT TOUCH\n", encoding="utf-8")
+            path = tmp / "AGENTS.md"
+            path.symlink_to(sentinel)
+            with mock.patch("builtins.input", side_effect=AssertionError("must not prompt")):
+                message = install.write_machine_file("Codex", path, interactive=True)
+            self.assertIn("symlink", message)
+            self.assertEqual(sentinel.read_text(encoding="utf-8"), "DO NOT TOUCH\n")
+
 
 if __name__ == "__main__":
     unittest.main()

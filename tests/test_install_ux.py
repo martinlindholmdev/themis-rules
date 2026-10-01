@@ -53,6 +53,19 @@ class EofAndNormalisationTests(unittest.TestCase):
         self.assertEqual(install._normalise_yes_no("N", "yes"), "no")
         self.assertEqual(install._normalise_yes_no("", "no"), "no")
 
+    def test_answers_from_a_file_are_normalised_like_interactive_ones(self):
+        """M4 finding 6: --answers values went into AGENTS.md raw."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            init_repo(root)
+            answers_path = root / "answers.json"
+            answers_path.write_text('{"libraries": "y", "live": "N", "reviewer": "GPT-5"}', encoding="utf-8")
+            args = argparse.Namespace(answers=str(answers_path), defaults=False)
+            answers = install.resolve_answers(root, args)
+            self.assertEqual(answers["libraries"], "yes")
+            self.assertEqual(answers["live"], "no")
+            self.assertEqual(answers["reviewer"], "GPT-5")
+
 
 class PlanPresentationTests(unittest.TestCase):
     def test_a_brand_new_vendored_file_is_summarised_with_a_hash_not_a_full_diff(self):
@@ -64,6 +77,19 @@ class PlanPresentationTests(unittest.TestCase):
         self.assertIn("identical to Themis v3", printed)
         self.assertIn("sha256", printed)
         self.assertNotIn("+++ b/tools/themis.py", printed)
+
+    def test_a_brand_new_non_vendored_file_is_shown_in_full(self):
+        """Fable's re-check, must-fix 4: only the vendored files (the
+        checker, the hook, the generated workflow) get summarised — every
+        other new file (the AGENTS.md block, themis.json, CLAUDE.md, the
+        fresh baseline) is shown in full, as the docs promise."""
+        content = "<!-- themis v3 begin -->\nsome rules text\n<!-- themis v3 end -->\n"
+        change = install.Change("AGENTS.md", None, content)
+        with mock.patch("builtins.print") as mock_print:
+            install.print_plan([change])
+        printed = "\n".join(str(c.args[0]) for c in mock_print.call_args_list)
+        self.assertIn("some rules text", printed)
+        self.assertNotIn("identical to Themis v3", printed)
 
     def test_the_fresh_baseline_is_part_of_the_plan(self):
         with tempfile.TemporaryDirectory() as tmp:
