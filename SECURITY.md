@@ -11,7 +11,7 @@ has no release SLA; expect an acknowledgement, not a guaranteed fix date.
 
 - `tools/themis.py` is standard-library Python only: no network access, no
   third-party dependencies. It writes to exactly one file, the baseline,
-  and only when explicitly asked to rebaseline.
+  and only under `rebaseline`, which can only lower it.
 - It scans staged diffs and commit ranges for secret-shaped strings
   (private keys, provider-shaped API tokens, long credential assignments)
   and refuses the commit. It is a pattern match, not an entropy model or a
@@ -41,8 +41,9 @@ has no release SLA; expect an acknowledgement, not a guaranteed fix date.
   shared hook file, which legitimately lives in the main repository's
   `.git` directory, not the worktree's own.
 - Force-pushes, deletes data, or skips a hook on your behalf.
-- Raises a size baseline on its own. Only the repository owner does that,
-  by hand, with `python3 tools/themis.py rebaseline`.
+- Raises a size baseline, for anyone: the baseline only goes down. A file
+  over a limit is split; `rebaseline` refuses to raise any number, and the
+  hook and the CI range check refuse a commit that does.
 
 ## For repositories that install Themis
 

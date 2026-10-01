@@ -55,9 +55,11 @@ The checker, `tools/themis.py`, runs on every commit and refuses it when:
   carries `themis: allow-secret`.
 
 The two limits, the marker text and the secret patterns are fixed in the
-checker and are not configured per repository. Only the owner raises the
-baseline, with `python3 tools/themis.py rebaseline`, committed like any
-other change. A matched secret is reported by file and line; the matched
+checker and are not configured per repository. The baseline only ever
+goes down: a file over a limit is split, never allowed to grow, and
+`python3 tools/themis.py rebaseline` lowers the recorded sizes (dropping
+entries for files that shrank under the limit or were deleted) but refuses,
+writing nothing, if it would raise any number. A matched secret is reported by file and line; the matched
 text is never printed.
 
 ## What is not enforced
@@ -89,9 +91,9 @@ three commands:
 - `status` reports what is installed, which hook mechanism is wired up, and
   which file extensions are and are not measured. A repository with no
   recognised source files fails loudly rather than reporting clean.
-- `rebaseline` records the current sizes as the new ceiling. Owner only; a
-  new install computes this once itself and shows it in the plan, rather
-  than running the command as a separate, unshown step.
+- `rebaseline` lowers the recorded sizes to today's. It refuses, writing
+  nothing, if that would raise any number or add any entry. A new install
+  computes the first baseline itself and shows it in the plan.
 
 `install.py` stays in this repository and is never copied. It writes the
 checker, the hook, `themis.json` and the rules block in `AGENTS.md`; wires

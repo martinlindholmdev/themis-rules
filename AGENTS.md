@@ -22,8 +22,8 @@ you read it.
 
 Shape
 1. [check] No file over 800 lines, no function over 100. Baseline sizes
-   may shrink, never grow. Over the limit: split the code. Never raise a
-   limit or edit the baseline; only the owner does.
+   may shrink, never grow (`rebaseline` only lowers them). Over the limit:
+   split the code. Never raise a limit.
 2. Every source file opens with a header under 30 lines: Purpose, Entry
    points, Invariants, Never change without a decision. Present tense.
 3. [check] Comments say what the code does now and why. No dates, "used

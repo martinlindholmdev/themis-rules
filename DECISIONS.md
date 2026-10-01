@@ -59,3 +59,9 @@ there. `tools/themis.py` and `install.py` never raise this file, and
   printed when Aider is not detected and `--agents aider` is not given.
 - `install.py` binds the names it uses from `install_plan.py` explicitly
   instead of copying every name across, so a linter sees each of them.
+- The size baseline never rises, for anyone. `rebaseline` only lowers
+  numbers or drops entries for files that shrank under the limit or were
+  deleted; it refuses, writing nothing, if it would raise a number or add an
+  entry. There is no override flag and no environment variable. A file over
+  the limit is split to grow. The hook and the CI range check refuse a
+  commit that raises the baseline.

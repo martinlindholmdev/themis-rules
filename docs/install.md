@@ -42,7 +42,7 @@ Safety rules, unchanged by any flag:
   legitimately lives in the main repo's `.git` directory, not the
   worktree's own.
 - `install` never deletes data or files it did not itself add, never
-  force-pushes, never skips a hook, and never raises a baseline number.
+  force-pushes, never skips a hook, and never raises a baseline number (the baseline only goes down).
 - If `.git` is read-only in this sandbox, `install` still writes the repo
   files and prints the exact `git config`/`git add`/`git commit` commands
   for the owner to run outside it.

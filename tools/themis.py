@@ -8,9 +8,10 @@ Entry points: `check` with no flag checks the whole tree; `check --staged`
 checks staged files, the staged diff and a baseline that only shrinks
 (what the pre-commit hook runs); `check --range A...B` runs the same
 whole-tree check at commit B and scans the direct (two-dot) diff A..B for
-secrets, comparing the config and baseline against A instead of HEAD (what the CI
-backstop runs); `status` reports what is wired up; `rebaseline` rewrites
-the baseline (owner only).
+secrets, comparing the config and baseline against A instead of HEAD (what
+the CI backstop runs); `status` reports what is wired up; `rebaseline`
+lowers the baseline to today's sizes and refuses, writing nothing, if that
+would raise any number or add any entry — the baseline only ever goes down.
 Invariants: standard library only, python3 3.9+, no network access;
 writes nothing except the baseline file, and only under `rebaseline`;
 every repo-specific value comes from `themis.json`, read fresh each run;
@@ -396,6 +397,18 @@ def fresh_baseline(measures: List[Measure]) -> dict:
     return {"_owner": owner_note, "files": dict(sorted(files.items())),
             "functions": dict(sorted(functions.items())), "history_words": dict(sorted(history.items()))}
 
+def _committed_baseline_text(root: Path, config: dict) -> Optional[str]:
+    """The baseline as committed (HEAD), else the one on disk, else None:
+    what rebaseline must never raise a number above."""
+    try:
+        return read(root, config["baseline_path"], "HEAD")
+    except subprocess.CalledProcessError:
+        pass
+    try:
+        return safe_rel_path(root, config["baseline_path"]).read_text(encoding="utf-8", errors="replace")
+    except (FileNotFoundError, PathEscapesRepo):
+        return None
+
 def write_baseline(root: Path, config: dict, data: dict) -> None:
     path = safe_rel_path(root, config["baseline_path"])
     path.write_text(json.dumps(data, indent=1, ensure_ascii=False) + "\n", encoding="utf-8")
@@ -442,7 +455,7 @@ def baseline_problems(root: Path, config: dict, rev: str, new_ref: str, diff_arg
     violations = baseline_ratchet_violations(head_text, new_text)
     if not violations:
         return []
-    return ["%s: the baseline only goes down; ask the owner (%s)"
+    return ["%s: the baseline only goes down; split the file instead (%s)"
             % (config["baseline_path"], "; ".join(violations))]
 
 def diff_additions(root: Path, *diff_args: str) -> List[Tuple[str, int, str]]:
@@ -656,20 +669,30 @@ def main(argv: Optional[List[str]] = None) -> int:
     group.add_argument("--staged", action="store_true", help="check staged files, diff and baseline")
     group.add_argument("--range", metavar="A...B", help="check the tree at B; scan the two-dot diff A..B for secrets")
     sub.add_parser("status", help="report what is installed and wired up")
-    sub.add_parser("rebaseline", help="owner only: rewrite the baseline from today's tree")
+    sub.add_parser("rebaseline", help="lower the baseline to today's sizes; never raises a number")
     args = parser.parse_args(argv)
     root = git_root()
     config = load_config(root)
     if args.command == "status":
         return print_status(root, config)
     if args.command == "rebaseline":
-        print("themis: rebaseline is for this repo's owner only; it rewrites "
-              "the baseline to today's sizes and never raises a number on its own.")
+        print("themis: rebaseline only lowers the baseline: it drops entries for files that shrank "
+              "under a limit or were deleted, and refuses to raise any number.")
         paths = tree_files(root, config)
         baseline = load_baseline(root, config)
         _, measures = run_checks(root, paths, None, baseline, config)
+        fresh = fresh_baseline(measures)
+        committed = _committed_baseline_text(root, config)
+        if committed is not None:
+            raised = baseline_ratchet_violations(committed, json.dumps(fresh))
+            if raised:
+                print("themis: refusing — rebaseline would raise the baseline, which only goes down. "
+                      "Split the file instead:")
+                for line in raised:
+                    print("  " + line)
+                return 1
         try:
-            write_baseline(root, config, fresh_baseline(measures))
+            write_baseline(root, config, fresh)
         except PathEscapesRepo as exc:
             print("themis: refusing to write the baseline — %s" % exc)
             return 1
