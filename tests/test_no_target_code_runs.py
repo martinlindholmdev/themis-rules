@@ -1,4 +1,4 @@
-"""Purpose: reproduce and guard against Fable's release-review finding 3:
+"""Purpose: reproduce and guard against an independent release review's finding 3:
 install.py's final `status` run must never execute code from the target
 repo. Without `-I`, Python puts the script's own directory first on
 sys.path, so a target repo's own tools/argparse.py (or any stdlib-named
@@ -33,7 +33,7 @@ class NoTargetCodeRunsTests(unittest.TestCase):
 
             install = importlib_module()
             install.HERE = ROOT  # so the byte-compare passes against our real source
-            install.run_verified_status(repo)
+            install.PLAN.run_verified_status(repo)
 
             self.assertFalse((repo / "pwned.txt").exists(),
                               "the target repo's tools/argparse.py ran during status")

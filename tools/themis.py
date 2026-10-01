@@ -7,8 +7,8 @@ report whether enforcement is actually on.
 Entry points: `check` with no flag checks the whole tree; `check --staged`
 checks staged files, the staged diff and a baseline that only shrinks
 (what the pre-commit hook runs); `check --range A...B` runs the same
-whole-tree check at commit B and scans `git diff A...B` for secrets,
-comparing the config and baseline against A instead of HEAD (what the CI
+whole-tree check at commit B and scans the direct (two-dot) diff A..B for
+secrets, comparing the config and baseline against A instead of HEAD (what the CI
 backstop runs); `status` reports what is wired up; `rebaseline` rewrites
 the baseline (owner only).
 Invariants: standard library only, python3 3.9+, no network access;
@@ -654,7 +654,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     p_check = sub.add_parser("check", help="check the whole tree, staged files, or a commit range")
     group = p_check.add_mutually_exclusive_group()
     group.add_argument("--staged", action="store_true", help="check staged files, diff and baseline")
-    group.add_argument("--range", metavar="A...B", help="check the tree at B; scan git diff A...B for secrets")
+    group.add_argument("--range", metavar="A...B", help="check the tree at B; scan the two-dot diff A..B for secrets")
     sub.add_parser("status", help="report what is installed and wired up")
     sub.add_parser("rebaseline", help="owner only: rewrite the baseline from today's tree")
     args = parser.parse_args(argv)

@@ -1,4 +1,4 @@
-"""Purpose: reproduce and guard against Fable's release-review findings
+"""Purpose: reproduce and guard against an independent release review's findings
 6a (a trailing top-level YAML key after "repos:" must stop the
 pre-commit-framework append, not produce invalid YAML) and 6b (the call
 line must land right after the shebang, never before whichever "exit" or
@@ -26,7 +26,7 @@ class PreCommitConfigTests(unittest.TestCase):
             root = Path(tmp)
             (root / ".pre-commit-config.yaml").write_text(
                 "repos:\n-   repo: foo\n    hooks: []\nci:\n  autofix: true\n", encoding="utf-8")
-            changes, notes = install.plan_hook(root)
+            changes, notes = install.PLAN.plan_hook(root)
             self.assertEqual(changes, [])
             self.assertTrue(any("isn't the last top-level key" in n for n in notes))
 
@@ -34,7 +34,7 @@ class PreCommitConfigTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             (root / ".pre-commit-config.yaml").write_text("repos:\n-   repo: foo\n    hooks: []\n", encoding="utf-8")
-            changes, notes = install.plan_hook(root)
+            changes, notes = install.PLAN.plan_hook(root)
             self.assertEqual(len(changes), 1)
             self.assertIn("id: themis", changes[0].new)
 
@@ -49,7 +49,7 @@ class ClassicHookInsertionTests(unittest.TestCase):
             hooks.mkdir(parents=True, exist_ok=True)
             (hooks / "pre-commit").write_text(
                 "#!/bin/sh\nif [ -z \"$SKIP\" ]; then\n  echo running\n  exit 0\nfi\n", encoding="utf-8")
-            changes, notes = install.plan_classic_hook(root)
+            changes, notes = install.PLAN.plan_classic_hook(root)
             self.assertEqual(len(changes), 1)
             lines = changes[0].new.splitlines()
             self.assertEqual(lines[0], "#!/bin/sh")

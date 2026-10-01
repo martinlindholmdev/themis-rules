@@ -1,4 +1,4 @@
-"""Purpose: reproduce and guard against GPT-6 Astra's re-check finding
+"""Purpose: reproduce and guard against an independent security re-check finding
 [5]: an added line whose own content is "++ something" is rendered by
 git as "+++ something" — identical to a real unified-diff file-header
 line — so the old parser mistook it for one, corrupting the path

@@ -1,4 +1,4 @@
-"""Purpose: reproduce and guard against Fable's release-review finding 2:
+"""Purpose: reproduce and guard against an independent release review's finding 2:
 `check --staged` must measure staged files against the baseline that is
 actually staged (or committed), never one just sitting unstaged in the
 working tree — otherwise `rebaseline` without `git add` silently widens

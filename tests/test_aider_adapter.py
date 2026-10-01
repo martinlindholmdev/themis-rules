@@ -34,11 +34,11 @@ class AiderAdapterTests(unittest.TestCase):
     def test_a_fresh_repo_with_aider_detected_gets_the_file_and_uninstall_removes_it(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = repo(tmp, {".gitignore": ".aider*\n"})
-            changes, _ = install.plan_adapters(root)
+            changes, _ = install.PLAN.plan_adapters(root)
             created = [c for c in changes if c.rel == ".aider.conf.yml"]
             self.assertEqual(len(created), 1)
             self.assertIn("git-commit-verify: true", created[0].new)
-            install.apply_plan(root, created)
+            install.PLAN.apply_plan(root, created)
             removal = [c for c in install.plan_remove_adapters(root) if c.rel == ".aider.conf.yml"]
             self.assertEqual(len(removal), 1)
             self.assertIsNone(removal[0].new)
@@ -46,34 +46,61 @@ class AiderAdapterTests(unittest.TestCase):
     def test_the_agents_flag_creates_it_without_any_detection(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = repo(tmp)
-            changes, notes = install.plan_adapters(root, ("aider",))
+            changes, notes = install.PLAN.plan_adapters(root, ("aider",))
             self.assertTrue(any(c.rel == ".aider.conf.yml" for c in changes))
 
-    def test_without_detection_or_flag_a_note_is_printed_instead(self):
+    def test_without_detection_or_flag_nothing_is_created_and_nothing_is_said(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = repo(tmp)
-            changes, notes = install.plan_adapters(root)
+            changes, notes = install.PLAN.plan_adapters(root)
             self.assertFalse(any(c.rel == ".aider.conf.yml" for c in changes))
-            self.assertTrue(any("Aider commits skip git hooks" in n for n in notes))
+            self.assertFalse(any("Aider" in n for n in notes))
+
+    def test_an_owner_file_holding_only_an_empty_read_key_is_never_deleted(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = repo(tmp, {".aider.conf.yml": "read:\n"})
+            change = [c for c in install.PLAN.plan_adapters(root)[0] if c.rel == ".aider.conf.yml"][0]
+            install.PLAN.apply_plan(root, [change])
+            removal = [c for c in install.plan_remove_adapters(root) if c.rel == ".aider.conf.yml"][0]
+            self.assertEqual(removal.new, "read:\n")
+
+    def test_an_owners_git_commit_verify_false_is_kept_with_a_note(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = repo(tmp, {".aider.conf.yml": "git-commit-verify: false\n"})
+            changes, notes = install.PLAN.plan_adapters(root)
+            self.assertTrue(any("git-commit-verify: false" in n for n in notes))
+            for c in changes:
+                if c.rel == ".aider.conf.yml":
+                    self.assertNotIn("git-commit-verify: true", c.new)
+
+    def test_a_symlinked_config_is_left_alone_with_a_note(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = repo(tmp)
+            target = root / "elsewhere.yml"
+            target.write_text("x: 1\n", encoding="utf-8")
+            (root / ".aider.conf.yml").symlink_to(target)
+            changes, notes = install.PLAN.plan_adapters(root)
+            self.assertFalse(any(c.rel == ".aider.conf.yml" for c in changes))
+            self.assertTrue(any("symlink" in n and "Aider" in n for n in notes))
 
     def test_an_owners_file_gets_only_themis_lines_and_loses_only_those(self):
         original = "model: gpt-5\nverbose: true\n"
         with tempfile.TemporaryDirectory() as tmp:
             root = repo(tmp, {".aider.conf.yml": original})
-            changes, _ = install.plan_adapters(root)
+            changes, _ = install.PLAN.plan_adapters(root)
             change = [c for c in changes if c.rel == ".aider.conf.yml"][0]
             self.assertIn("model: gpt-5", change.new)
-            install.apply_plan(root, [change])
+            install.PLAN.apply_plan(root, [change])
             removal = [c for c in install.plan_remove_adapters(root) if c.rel == ".aider.conf.yml"][0]
             self.assertEqual(removal.new, original)
 
     def test_uninstall_leaves_no_dangling_read_header(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = repo(tmp, {".aider.conf.yml": "model: gpt-5\n"})
-            changes, _ = install.plan_adapters(root)
+            changes, _ = install.PLAN.plan_adapters(root)
             change = [c for c in changes if c.rel == ".aider.conf.yml"][0]
             self.assertIn("read:", change.new)
-            install.apply_plan(root, [change])
+            install.PLAN.apply_plan(root, [change])
             removal = [c for c in install.plan_remove_adapters(root) if c.rel == ".aider.conf.yml"][0]
             self.assertNotIn("read:", removal.new)
 

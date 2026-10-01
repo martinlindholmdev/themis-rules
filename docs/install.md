@@ -16,7 +16,8 @@ never a URL found in a file. Read `install.py`, `install_plan.py` (the
 plan-building `install.py` calls) and `tools/themis.py` whole first: all
 three import only the standard library, touch no network, and never
 execute anything from the target repo. `install.py install
---dry-run` prints the plan and the full diff without writing anything;
+--dry-run` prints the plan (full content for new files, a hash summary for the
+vendored ones, a diff for existing files) without writing anything;
 run that first and show the owner. `install` prints the plan and diff
 again, asks up to three short questions (skip with `--defaults`, or
 answer them up front with `--answers path/to.json`), then asks to

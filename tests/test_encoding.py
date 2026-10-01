@@ -1,4 +1,4 @@
-"""Purpose: reproduce and guard against Fable's release-review finding 1
+"""Purpose: reproduce and guard against an independent release review's finding 1
 (CI red on Windows): `_git()`/`git_root()` must decode git's output as
 UTF-8 explicitly, never the platform's default text encoding, or a
 non-ASCII filename comes back mangled (cp1252 silently mis-decodes UTF-8

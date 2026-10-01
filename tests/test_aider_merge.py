@@ -1,4 +1,4 @@
-"""Purpose: reproduce and guard against Fable's release-review finding 7
+"""Purpose: reproduce and guard against an independent release review's finding 7
 and re-check must-fix 3: the Aider adapter must add AGENTS.md to an
 existing `read:` key without ever touching the owner's own entries — not
 by appending a second `read:` key (YAML keeps only the last of two
@@ -25,7 +25,7 @@ spec.loader.exec_module(install)
 class AiderReadMergeTests(unittest.TestCase):
     def test_a_bare_scalar_read_survives_install_then_uninstall(self):
         original = "read: CONVENTIONS.md\n"
-        merged = install._merge_aider_read(original)
+        merged = install.PLAN._merge_aider_read(original)
         self.assertIn("CONVENTIONS.md", merged)
         self.assertIn("AGENTS.md", merged)
         self.assertEqual(merged.count("read:"), 1)
@@ -35,7 +35,7 @@ class AiderReadMergeTests(unittest.TestCase):
 
     def test_a_block_list_read_survives_install_then_uninstall(self):
         original = "read:\n  - CONVENTIONS.md\n  - STYLE.md\n"
-        merged = install._merge_aider_read(original)
+        merged = install.PLAN._merge_aider_read(original)
         self.assertIn("CONVENTIONS.md", merged)
         self.assertIn("STYLE.md", merged)
         self.assertIn("AGENTS.md", merged)
@@ -50,7 +50,7 @@ class AiderReadMergeTests(unittest.TestCase):
         the owner's CONVENTIONS.md on the same line as the marker, so
         uninstall's line-strip deleted the owner's entry along with it."""
         original = "read: [CONVENTIONS.md, STYLE.md]\n"
-        self.assertIsNone(install._merge_aider_read(original))
+        self.assertIsNone(install.PLAN._merge_aider_read(original))
 
 
 if __name__ == "__main__":

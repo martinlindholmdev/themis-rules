@@ -17,8 +17,9 @@ Both must be clean.
 installs Themis, so a behaviour change there is an upgrade for all of them
 and needs a test in `tests/`, not only a passing `status`. It stays under
 800 lines and standard-library only: no network, no dependencies.
-`install.py` (the command-line entry points) and `install_plan.py` (the
-plan it builds) each stay under 800 lines with no function over 100, and
+`install.py` (the commands, the uninstall planners and the machine-level
+writers) and `install_plan.py` (the install plan-building and shared
+mechanics) each stay under 800 lines with no function over 100, and
 run only in this repository.
 
 Small, focused changes reviewed by a different model are preferred over

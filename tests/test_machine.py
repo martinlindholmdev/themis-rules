@@ -105,7 +105,7 @@ class WriteMachineFileTests(unittest.TestCase):
             self.assertIn("skipped", message)
 
     def test_a_symlinked_dotfile_is_rejected_before_prompting(self):
-        """Astra's re-check 'also': a symlinked dotfile was treated as
+        """the independent re-check 'also': a symlinked dotfile was treated as
         absent (current=None), skipping the backup, then written through —
         it must be rejected outright, before any prompt."""
         with tempfile.TemporaryDirectory() as tmp:

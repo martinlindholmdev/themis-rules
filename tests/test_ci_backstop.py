@@ -1,4 +1,4 @@
-"""Purpose: reproduce and guard against Fable's release-review finding 4:
+"""Purpose: reproduce and guard against an independent release review's finding 4:
 the CI backstop must run the BASE commit's own copy of tools/themis.py on
 a pull request, never the PR's — otherwise a PR that rewrites the
 checker to always pass checks itself and gets away with it.
@@ -81,7 +81,7 @@ class CiBackstopTests(unittest.TestCase):
             self.skipTest("no working bash found (the generated workflow only ever runs on ubuntu-latest)")
 
     def test_a_pr_that_neuters_tools_themis_py_is_still_caught(self):
-        script = extract_pr_script(install.CI_WORKFLOW)
+        script = extract_pr_script(install.PLAN.CI_WORKFLOW)
         with tempfile.TemporaryDirectory() as tmp:
             repo = Path(tmp) / "repo"
             repo.mkdir()
@@ -125,10 +125,10 @@ class CiBackstopTests(unittest.TestCase):
             self.assertNotIn(secret, result.stdout)
 
     def test_a_push_with_a_secret_is_also_caught(self):
-        """Astra's hardening note: push ran a whole-tree check with no
+        """A hardening note from the independent review: push ran a whole-tree check with no
         secret scan at all; a secret pushed straight to a branch (no PR)
         must still be caught, using the pre-push commit as the base."""
-        script = extract_pr_script(install.CI_WORKFLOW)
+        script = extract_pr_script(install.PLAN.CI_WORKFLOW)
         with tempfile.TemporaryDirectory() as tmp:
             repo = Path(tmp) / "repo"
             repo.mkdir()
@@ -168,11 +168,11 @@ class CiBackstopTests(unittest.TestCase):
             self.assertNotIn(secret, result.stdout)
 
     def test_a_brand_new_branch_push_with_a_secret_is_also_caught(self):
-        """Astra's re-check [4]: github.event.before is all zeros on a
+        """the independent re-check: github.event.before is all zeros on a
         brand-new branch, so the old script ran a bare whole-tree check
         with no secret scan at all — a key committed on the very first
         push would never be caught."""
-        script = extract_pr_script(install.CI_WORKFLOW)
+        script = extract_pr_script(install.PLAN.CI_WORKFLOW)
         with tempfile.TemporaryDirectory() as tmp:
             repo = Path(tmp) / "repo"
             repo.mkdir()

@@ -1,4 +1,4 @@
-"""Purpose: reproduce and guard against Fable's re-check, must-fix 2:
+"""Purpose: reproduce and guard against the independent re-check's, must-fix 2:
 `rebaseline` must confine `baseline_path` to the repo exactly like
 install.py's safe_path — an owner or agent can set it to anything in
 themis.json, and `write_baseline`/`load_baseline` wrote or read it

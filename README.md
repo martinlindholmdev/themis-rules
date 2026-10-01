@@ -27,7 +27,8 @@ python3 "$THEMIS_SRC/install.py" install
 Or tell your agent: "Install Themis from
 github.com/martinlindholmdev/themis-rules at tag v3."
 
-The installer reads the repository, prints the plan and the full diff, and
+The installer reads the repository, prints the plan (full content for the new files it owns, a hash summary for
+the vendored ones, a diff for files that already exist), and
 writes nothing until you confirm. It makes no network requests, executes
 nothing from the target repository, and never runs `git commit`. The agent's
 instructions and the safety rules are in [docs/install.md](docs/install.md).
@@ -48,7 +49,7 @@ The checker, `tools/themis.py`, runs on every commit and refuses it when:
 - a file is over 800 lines or a function over 100, or either has grown past
   its recorded baseline;
 - a comment matches one of the history patterns (a date, "previously",
-  "used to", a reviewer name) beyond its baseline count;
+  "used to", the word "reviewer") beyond its baseline count;
 - a staged line matches a private key, a provider-shaped API token, a long
   bearer token, or a password, secret or token assignment, unless the line
   carries `themis: allow-secret`.
@@ -82,8 +83,9 @@ three commands:
 
 - `check` measures every recognised source file against
   `themis-baseline.json`. `--staged` measures the staged files and the
-  staged diff (what the pre-commit hook runs). `--range A...B` measures the
-  tree at `B` and scans `git diff A...B` for secrets (what CI runs).
+  staged diff (what the pre-commit hook runs). `--range A...B` (the flag's spelling) measures
+  the tree at `B` and scans the direct, two-dot diff `A..B` for secrets (what
+  CI runs).
 - `status` reports what is installed, which hook mechanism is wired up, and
   which file extensions are and are not measured. A repository with no
   recognised source files fails loudly rather than reporting clean.

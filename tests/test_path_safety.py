@@ -1,4 +1,4 @@
-"""Purpose: reproduce and guard against GPT-6 Astra's finding [1]: a
+"""Purpose: reproduce and guard against an independent security review's path finding: a
 tracked file that is itself a symlink to something outside the target
 repo must never be read (its content shown in a diff), written through,
 or deleted — and a hook config pointing outside the repo must be
@@ -33,12 +33,12 @@ def _init_repo(root: Path) -> None:
 
 class SafePathTests(unittest.TestCase):
     def test_absolute_path_is_rejected(self):
-        with self.assertRaises(install.PathEscapesRepo):
-            install.safe_path(Path("/repo"), "/etc/passwd")
+        with self.assertRaises(install.PLAN.PathEscapesRepo):
+            install.PLAN.safe_path(Path("/repo"), "/etc/passwd")
 
     def test_dotdot_is_rejected(self):
-        with self.assertRaises(install.PathEscapesRepo):
-            install.safe_path(Path("/repo"), "../outside.txt")
+        with self.assertRaises(install.PLAN.PathEscapesRepo):
+            install.PLAN.safe_path(Path("/repo"), "../outside.txt")
 
     def test_a_symlinked_leaf_is_rejected(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -48,8 +48,8 @@ class SafePathTests(unittest.TestCase):
             target = tmp / "outside.txt"
             target.write_text("x", encoding="utf-8")  # must exist: a dangling
             (root / "link.txt").symlink_to(target)     # link resolves oddly on Windows
-            with self.assertRaises(install.PathEscapesRepo):
-                install.safe_path(root, "link.txt")
+            with self.assertRaises(install.PLAN.PathEscapesRepo):
+                install.PLAN.safe_path(root, "link.txt")
 
     def test_a_symlinked_parent_directory_is_rejected(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -59,11 +59,11 @@ class SafePathTests(unittest.TestCase):
             outside = tmp / "outside"
             outside.mkdir()
             (root / "tools").symlink_to(outside)
-            with self.assertRaises(install.PathEscapesRepo):
-                install.safe_path(root, "tools/themis.py")
+            with self.assertRaises(install.PLAN.PathEscapesRepo):
+                install.PLAN.safe_path(root, "tools/themis.py")
 
     def test_a_symlink_resolving_inside_the_repo_is_still_rejected(self):
-        """Fable's re-check, must-fix 5: tools/themis.py -> ../README.md
+        """the independent re-check's, must-fix 5: tools/themis.py -> ../README.md
         resolves back inside the repo, so the old containment-only check
         accepted it — and the write landed on README.md, not themis.py."""
         with tempfile.TemporaryDirectory() as tmp:
@@ -73,12 +73,12 @@ class SafePathTests(unittest.TestCase):
             (root / "README.md").write_text("original readme\n", encoding="utf-8")
             (root / "tools").mkdir()
             (root / "tools" / "themis.py").symlink_to(root / "README.md")
-            with self.assertRaises(install.PathEscapesRepo):
-                install.safe_path(root, "tools/themis.py")
+            with self.assertRaises(install.PLAN.PathEscapesRepo):
+                install.PLAN.safe_path(root, "tools/themis.py")
 
     def test_an_ordinary_path_is_accepted(self):
         root = Path("/repo")
-        self.assertEqual(install.safe_path(root, "AGENTS.md"), root / "AGENTS.md")
+        self.assertEqual(install.PLAN.safe_path(root, "AGENTS.md"), root / "AGENTS.md")
 
 
 class SymlinkedTrackedFileTests(unittest.TestCase):
@@ -92,11 +92,11 @@ class SymlinkedTrackedFileTests(unittest.TestCase):
             (root / "CLAUDE.md").symlink_to(sentinel)
 
             # planning never reads the sentinel's content
-            self.assertIsNone(install.read_text(root, "CLAUDE.md"))
+            self.assertIsNone(install.PLAN.read_text(root, "CLAUDE.md"))
 
             # applying a plan never writes through the symlink
-            change = install.Change("CLAUDE.md", None, "@AGENTS.md\n")
-            failures, failed_rels = install.apply_plan(root, [change])
+            change = install.PLAN.Change("CLAUDE.md", None, "@AGENTS.md\n")
+            failures, failed_rels = install.PLAN.apply_plan(root, [change])
             self.assertTrue(failures, "writing through a symlink should have been refused")
             self.assertIn("CLAUDE.md", failed_rels)
             self.assertEqual(sentinel.read_text(encoding="utf-8"), "DO NOT TOUCH\n")
@@ -110,14 +110,14 @@ class SymlinkedTrackedFileTests(unittest.TestCase):
             sentinel.write_text("DO NOT TOUCH\n", encoding="utf-8")
             (root / "themis.json").symlink_to(sentinel)
 
-            change = install.Change("themis.json", "whatever", None)
-            install.apply_plan(root, [change])
+            change = install.PLAN.Change("themis.json", "whatever", None)
+            install.PLAN.apply_plan(root, [change])
             self.assertTrue(sentinel.exists())
             self.assertEqual(sentinel.read_text(encoding="utf-8"), "DO NOT TOUCH\n")
 
 
 class PlanTimeRejectionTests(unittest.TestCase):
-    """Fable's re-check, follow-up 7: an escaping path must refuse the
+    """the independent re-check's, follow-up 7: an escaping path must refuse the
     whole install before anything is written, not fail partway through
     applying it with themis.json and AGENTS.md already on disk — and a
     parent-symlinked tools/ must refuse cleanly, never crash."""
@@ -144,7 +144,7 @@ class PlanTimeRejectionTests(unittest.TestCase):
 
 
 class SymlinkAwareConfigReadsTests(unittest.TestCase):
-    """Fable's re-check, follow-up 6: lefthook.yml, .pre-commit-config.yaml
+    """the independent re-check's, follow-up 6: lefthook.yml, .pre-commit-config.yaml
     and themis.json must be read the same symlink-aware way as every
     other tracked file install.py touches — a dry run must never print an
     external file's content just because a config name pointed at it."""
@@ -158,7 +158,7 @@ class SymlinkAwareConfigReadsTests(unittest.TestCase):
             sentinel = tmp / "sentinel.yml"
             sentinel.write_text("SECRET EXTERNAL CONTENT\n", encoding="utf-8")
             (root / "lefthook.yml").symlink_to(sentinel)
-            changes, _ = install.plan_hook(root)
+            changes, _ = install.PLAN.plan_hook(root)
             self.assertFalse(any("SECRET EXTERNAL" in str(c.new) for c in changes))
 
     def test_a_symlinked_themis_json_is_never_read_as_config(self):
@@ -172,11 +172,11 @@ class SymlinkAwareConfigReadsTests(unittest.TestCase):
             (root / "themis.json").symlink_to(sentinel)
             # must not raise json.JSONDecodeError trying to parse the
             # sentinel's content as this repo's own config
-            changes = install.plan_core_files(root)
+            changes = install.PLAN.plan_core_files(root)
             self.assertFalse(any("not valid json" in str(c.old) for c in changes))
 
     def test_a_parent_symlinked_tools_directory_is_never_read_through(self):
-        """Astra's re-check [1]: read_text checked only the leaf, so
+        """the independent re-check: read_text checked only the leaf, so
         tools -> outside still disclosed the external file's content
         when comparing it against our own vendored tools/themis.py."""
         with tempfile.TemporaryDirectory() as tmp:
@@ -187,10 +187,10 @@ class SymlinkAwareConfigReadsTests(unittest.TestCase):
             outside.mkdir()
             (outside / "themis.py").write_text("SECRET EXTERNAL PAYLOAD\n", encoding="utf-8")
             (root / "tools").symlink_to(outside)
-            self.assertIsNone(install.read_text(root, "tools/themis.py"))
+            self.assertIsNone(install.PLAN.read_text(root, "tools/themis.py"))
 
     def test_a_symlinked_legacy_baseline_is_never_copied(self):
-        """Astra's re-check [1]: the legacy agent-rules-baseline.json
+        """the independent re-check: the legacy agent-rules-baseline.json
         migration copied a symlink's target bytes straight into the new
         themis-baseline.json."""
         with tempfile.TemporaryDirectory() as tmp:
@@ -201,7 +201,7 @@ class SymlinkAwareConfigReadsTests(unittest.TestCase):
             sentinel = tmp / "sentinel.json"
             sentinel.write_text("SECRET EXTERNAL BASELINE\n", encoding="utf-8")
             (root / "agent-rules-baseline.json").symlink_to(sentinel)
-            changes = install.plan_core_files(root)
+            changes = install.PLAN.plan_core_files(root)
             self.assertFalse(any("SECRET EXTERNAL" in str(c.new) for c in changes))
 
 

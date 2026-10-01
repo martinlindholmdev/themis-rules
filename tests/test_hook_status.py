@@ -1,4 +1,4 @@
-"""Purpose: reproduce and guard against Fable's release-review finding 9:
+"""Purpose: reproduce and guard against an independent release review's finding 9:
 `status` must say "off" for husky/lefthook/pre-commit when the manager's
 own file names themis.py but the manager was never actually installed in
 this clone (core.hooksPath never pointed at its shim) — naming the

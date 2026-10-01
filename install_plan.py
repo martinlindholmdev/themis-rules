@@ -502,23 +502,26 @@ def plan_adapters(root: Path, agents: Tuple[str, ...] = ()) -> Tuple[List[Change
         changes.append(Change("CLAUDE.md", claude, claude.rstrip("\n") + "\n@AGENTS.md\n"))
 
     aider = read_text(root, AIDER_FILE)
-    if aider is None and not (root / AIDER_FILE).is_symlink():
-        if "aider" in agents or aider_in_use(root):
-            # Aider's auto-commit runs `git commit --no-verify` unless this
-            # file says otherwise, so without it the hook never runs there.
-            changes.append(Change(AIDER_FILE, None, AIDER_NEW))
-        else:
-            notes.append("Aider commits skip git hooks unless .aider.conf.yml sets git-commit-verify: true; "
-                         "if you use Aider, re-run with --agents aider")
-    if aider is not None and "AGENTS.md" not in aider:
-        new_aider = _merge_aider_read(aider)
-        if new_aider is None:
-            notes.append(".aider.conf.yml's read: is a flow list ([a, b]); add AGENTS.md to it "
-                         "by hand — editing that line is not safe to undo cleanly on uninstall")
-        else:
-            if "git-commit-verify" not in new_aider:
-                new_aider = new_aider.rstrip("\n") + "\ngit-commit-verify: true  # themis\n"
-            changes.append(Change(".aider.conf.yml", aider, new_aider))
+    if (root / AIDER_FILE).is_symlink():
+        notes.append(".aider.conf.yml is a symlink, so it is left untouched; Aider commits skip git "
+                     "hooks unless the file it points to sets git-commit-verify: true")
+    elif aider is None and ("aider" in agents or aider_in_use(root)):
+        # Aider's auto-commit runs `git commit --no-verify` unless this
+        # file says otherwise, so without it the hook never runs there.
+        changes.append(Change(AIDER_FILE, None, AIDER_NEW))
+    elif aider is not None:
+        if re.search(r"^git-commit-verify:\s*false\b", aider, re.MULTILINE | re.IGNORECASE):
+            notes.append(".aider.conf.yml sets git-commit-verify: false (your choice, left as is); "
+                         "Aider commits will skip the Themis hook")
+        if "AGENTS.md" not in aider:
+            new_aider = _merge_aider_read(aider)
+            if new_aider is None:
+                notes.append(".aider.conf.yml's read: is a flow list ([a, b]); add AGENTS.md to it "
+                             "by hand — editing that line is not safe to undo cleanly on uninstall")
+            else:
+                if "git-commit-verify" not in new_aider:
+                    new_aider = new_aider.rstrip("\n") + "\ngit-commit-verify: true  # themis\n"
+                changes.append(Change(AIDER_FILE, aider, new_aider))
 
     gemini = read_text(root, "GEMINI.md")
     if gemini is not None and "@AGENTS.md" not in gemini:

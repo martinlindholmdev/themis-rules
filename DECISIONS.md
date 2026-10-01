@@ -53,5 +53,9 @@ there. `tools/themis.py` and `install.py` never raise this file, and
   aider` is passed) install creates that file, every line marked
   `# themis`, and uninstall removes the file when only those lines are
   left; otherwise install prints a note.
-- This repo's `extra_history_words` carry the reviewers' names so a
-  comment that cites one is caught by the checker itself.
+- Aider: an owner file is never deleted unless every line in it is
+  Themis's; an owner's `git-commit-verify: false` and a symlinked
+  `.aider.conf.yml` are left alone with a printed note; no Aider note is
+  printed when Aider is not detected and `--agents aider` is not given.
+- `install.py` binds the names it uses from `install_plan.py` explicitly
+  instead of copying every name across, so a linter sees each of them.

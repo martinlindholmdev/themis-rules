@@ -1,10 +1,9 @@
-"""Purpose: cover the M4 release-test usability findings: Ctrl-D at a
-question must not crash (finding 5), a y/n reply is normalised before
-being written into AGENTS.md (finding 6), a brand-new vendored file is
-summarised rather than shown as a ~600-line diff (finding 7), the fresh
-baseline is part of the shown plan, not a silent write after (finding 8
-/ Astra [1]), and a secret already sitting in an existing file's context
-lines is never echoed into a diff (Fable finding 8).
+"""Purpose: cover what the person running the installer sees: Ctrl-D at a
+question cancels instead of crashing, a y/n reply is stored as yes/no,
+a brand-new vendored file is summarised by hash rather than as a long
+diff, every other new file and the fresh baseline appear in full in the
+plan, and a secret in an existing file's context lines is never echoed
+into a diff.
 Entry points: run by `python3 -m unittest discover -s tests`.
 Invariants: builds throwaway repos under a TemporaryDirectory.
 Never change without a decision: which reply strings count as yes/no.
@@ -45,23 +44,23 @@ class EofAndNormalisationTests(unittest.TestCase):
             args = argparse.Namespace(answers=None, defaults=False)
             with mock.patch("sys.stdin.isatty", return_value=True), \
                  mock.patch("builtins.input", side_effect=EOFError):
-                with self.assertRaises(install.Cancelled):
-                    install.resolve_answers(repo, args)
+                with self.assertRaises(install.PLAN.Cancelled):
+                    install.PLAN.resolve_answers(repo, args)
 
     def test_a_bare_y_reply_is_stored_as_yes(self):
-        self.assertEqual(install._normalise_yes_no("y", "no"), "yes")
-        self.assertEqual(install._normalise_yes_no("N", "yes"), "no")
-        self.assertEqual(install._normalise_yes_no("", "no"), "no")
+        self.assertEqual(install.PLAN._normalise_yes_no("y", "no"), "yes")
+        self.assertEqual(install.PLAN._normalise_yes_no("N", "yes"), "no")
+        self.assertEqual(install.PLAN._normalise_yes_no("", "no"), "no")
 
     def test_answers_from_a_file_are_normalised_like_interactive_ones(self):
-        """M4 finding 6: --answers values went into AGENTS.md raw."""
+        """release-test finding 6: --answers values went into AGENTS.md raw."""
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             init_repo(root)
             answers_path = root / "answers.json"
             answers_path.write_text('{"libraries": "y", "live": "N", "reviewer": "GPT-5"}', encoding="utf-8")
             args = argparse.Namespace(answers=str(answers_path), defaults=False)
-            answers = install.resolve_answers(root, args)
+            answers = install.PLAN.resolve_answers(root, args)
             self.assertEqual(answers["libraries"], "yes")
             self.assertEqual(answers["live"], "no")
             self.assertEqual(answers["reviewer"], "GPT-5")
@@ -70,23 +69,23 @@ class EofAndNormalisationTests(unittest.TestCase):
 class PlanPresentationTests(unittest.TestCase):
     def test_a_brand_new_vendored_file_is_summarised_with_a_hash_not_a_full_diff(self):
         source = (ROOT / "tools" / "themis.py").read_text(encoding="utf-8")
-        change = install.Change("tools/themis.py", None, source)
+        change = install.PLAN.Change("tools/themis.py", None, source)
         with mock.patch("builtins.print") as mock_print:
-            install.print_plan([change])
+            install.PLAN.print_plan([change])
         printed = " ".join(str(c.args[0]) for c in mock_print.call_args_list)
         self.assertIn("identical to Themis v3", printed)
         self.assertIn("sha256", printed)
         self.assertNotIn("+++ b/tools/themis.py", printed)
 
     def test_a_brand_new_non_vendored_file_is_shown_in_full(self):
-        """Fable's re-check, must-fix 4: only the vendored files (the
+        """the independent re-check's, must-fix 4: only the vendored files (the
         checker, the hook, the generated workflow) get summarised — every
         other new file (the AGENTS.md block, themis.json, CLAUDE.md, the
         fresh baseline) is shown in full, as the docs promise."""
         content = "<!-- themis v3 begin -->\nsome rules text\n<!-- themis v3 end -->\n"
-        change = install.Change("AGENTS.md", None, content)
+        change = install.PLAN.Change("AGENTS.md", None, content)
         with mock.patch("builtins.print") as mock_print:
-            install.print_plan([change])
+            install.PLAN.print_plan([change])
         printed = "\n".join(str(c.args[0]) for c in mock_print.call_args_list)
         self.assertIn("some rules text", printed)
         self.assertNotIn("identical to Themis v3", printed)
@@ -98,16 +97,16 @@ class PlanPresentationTests(unittest.TestCase):
             (repo / "main.py").write_text("def f():\n    return 1\n", encoding="utf-8")
             subprocess.run(["git", "-C", str(repo), "add", "-A"], check=True)
             subprocess.run(["git", "-C", str(repo), "commit", "-q", "-m", "init"], check=True)
-            changes = install.plan_core_files(repo)
+            changes = install.PLAN.plan_core_files(repo)
             self.assertTrue(any(c.rel == "themis-baseline.json" for c in changes))
 
     def test_a_secret_in_an_existing_files_context_lines_is_redacted(self):
         fake_key = "openai-api-key: " + "sk-1234567890abcdef1234"  # themis: allow-secret
         old = "read: CONVENTIONS.md\n%s\nverbose: true\n" % fake_key
         new = "read: CONVENTIONS.md\n  - AGENTS.md\n%s\nverbose: true\n" % fake_key
-        change = install.Change(".aider.conf.yml", old, new)
+        change = install.PLAN.Change(".aider.conf.yml", old, new)
         with mock.patch("builtins.print") as mock_print:
-            install.print_plan([change])
+            install.PLAN.print_plan([change])
         printed = " ".join(str(c.args[0]) for c in mock_print.call_args_list)
         self.assertNotIn(fake_key, printed)
         self.assertIn("redacted", printed)

@@ -1,7 +1,10 @@
 #!/usr/bin/env python3
-"""The install/uninstall/machine command line. The actual plan-building
-and shared mechanics live in install_plan.py (loaded below as PLAN); this
-file is only the five entry points and argument parsing.
+"""The install/uninstall/machine command line: argument parsing, the three
+commands, the uninstall planners (what to remove) and the machine-level
+pointer writers (user-level agent config files). What to write on
+install, and the primitives every command shares (path safety, the
+Change/apply/print machinery), live in install_plan.py, loaded below as
+PLAN; the names this file uses from it are bound explicitly.
 Entry points: `main()`, called with `install`/`machine`/`uninstall`.
 Invariants: no network access; never executes code from the target repo;
 `--yes` only skips the repo-part confirmation, never the machine part's
@@ -31,10 +34,18 @@ def _load(name: str, relative: str):
 
 
 PLAN = _load("install_plan", "install_plan.py")
-# a thin facade: everything install_plan.py defines is also reachable as
-# install.<name>, so this split is invisible to anything already written
-# against install.py (including every existing test).
-globals().update({n: getattr(PLAN, n) for n in dir(PLAN) if not n.startswith("__")})
+# names this file uses from install_plan, imported explicitly
+AIDER_FILE = PLAN.AIDER_FILE
+ANY_MARKER = PLAN.ANY_MARKER
+CALL_LINE = PLAN.CALL_LINE
+CI_WORKFLOW = PLAN.CI_WORKFLOW
+Change = PLAN.Change
+LEFTHOOK_BLOCK = PLAN.LEFTHOOK_BLOCK
+POINTER_URL = PLAN.POINTER_URL
+PRECOMMIT_BLOCK = PLAN.PRECOMMIT_BLOCK
+THEMIS = PLAN.THEMIS
+confirm = PLAN.confirm
+read_text = PLAN.read_text
 
 def do_install(root: Path, args: argparse.Namespace) -> int:
     try:
@@ -165,10 +176,6 @@ def _strip_aider(text: str) -> str:
                 if rest and rest[0].startswith((" ", "\t")) and rest[0].lstrip().startswith("-"):
                     out.append("read:\n")
             continue
-        if line.strip() == "read:" and i + 1 < len(lines) and "# themis" in lines[i + 1]:
-            rest = lines[i + 2:]
-            if not (rest and rest[0].startswith((" ", "\t")) and rest[0].lstrip().startswith("-")):
-                continue
         out.append(line)
     return "".join(out)
 

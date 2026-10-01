@@ -143,7 +143,7 @@ secondary: agenticcontrolplane.com/controls/antigravity,
 agenticcontrolplane.com/blog/antigravity-permissions-reference.
 
 > **Headless Antigravity needs several allow-rules, not one.** Measured
-> on the M4 on 2026-10-01 (not taken from Google's documentation): an
+> on a test machine on 2026-10-01 (not taken from Google's documentation): an
 > unattended `agy -p "install Themis..."` only got through once its
 > settings allowed `toolPermission` `proceed-in-sandbox` (or an
 > equivalent), `command(git)`, and `read_url` for both `github.com` and
@@ -158,7 +158,7 @@ it auto-commits its own edits. (d) **skips hooks by default** —
 `git-commit-verify` defaults to `False`, i.e. commits run with
 `--no-verify` unless told otherwise. (e) `git-commit-verify: true` in
 config. (f) Aider's auto-commit runs `git commit --no-verify` without that
-setting (confirmed with `GIT_TRACE` on the M4, 2026-10-01), so when Aider
+setting (confirmed with `GIT_TRACE` on a test machine, 2026-10-01), so when Aider
 is detected in the repo (`.aider.conf.yml`, `.aider.chat.history.md`,
 `.aider.tags.cache*`, or `.aider` in `.gitignore`) or `install --agents
 aider` is passed, Themis creates `.aider.conf.yml` with `read: AGENTS.md`
