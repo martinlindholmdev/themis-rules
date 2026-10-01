@@ -261,15 +261,39 @@ class ReviewHoleTests(unittest.TestCase):
                 sizes, _ = lang.functions(template % BODY, ext)
                 self.assertGreater(sizes.get(key, 0), 100)
 
-    def test_slash_scanning_is_linear_and_unchanged(self):
-        def timed(size):
-            source = "/ " * (size // 2 // 3 * 3 + 2) + ";\n"
-            start = time.time()
-            lang.analyse(source, ".js")
-            return time.time() - start
-        small, large = timed(32000), timed(128000)
-        self.assertLess(large, 1.0)
-        self.assertLess(large, 6 * max(small, 0.02))
+    HOSTILE = {
+        ".rs": ['"', 'r#"', 'b"', "'", "/*", "/*/*"],
+        ".go": ["`", '"', "'", "/*"],
+        ".swift": ['#"', '"""', '"', "\\(", "/*", "#/"],
+        ".kt": ['"""', '"${', '"', "`", "/*"],
+        ".java": ['"""', '"', "'", "/*"],
+        ".cs": ['@"', '$"', '$@"', '"""', '"', "/*"],
+        ".ts": ["`", "`${", '"', "'", "/[", "/", "/*", "/ "],
+    }
+
+    @staticmethod
+    def hostile_source(unit, size, many_lines):
+        if many_lines:
+            row = unit * (80 // len(unit) + 1) + "\n"
+            return "var " + row * (size // len(row) + 1)
+        return "var " + unit * (size // len(unit)) + "\n"
+
+    def test_hostile_input_is_scanned_in_linear_time(self):
+        for ext, units in self.HOSTILE.items():
+            for unit in units:
+                for variant in (unit, unit + "\\"):
+                    for many_lines in (False, True):
+                        times = []
+                        for size in (32000, 128000):
+                            source = self.hostile_source(variant, size, many_lines)
+                            start = time.time()
+                            lang.analyse(source, ext)
+                            times.append(time.time() - start)
+                        with self.subTest(ext=ext, unit=variant, many_lines=many_lines):
+                            self.assertLess(times[1], 1.0)
+                            self.assertLess(times[1], 6 * max(times[0], 0.05))
+
+    def test_regex_and_division_blank_the_same_spans(self):
         sample = "const r = /[/]x/g, q = a / b / c; // note\nreturn /y/.test(q)\n"
         scan = lang.Scan(sample, "js")
         self.assertEqual(scan.code, 'const r = "     g, q = a / b / c;        \nreturn "  .test(q)\n')

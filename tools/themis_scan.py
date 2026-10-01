@@ -11,8 +11,11 @@ Invariants: standard library only, python3 3.9+; pure over the text, no file
 access, no printing, no module-level mutable state; code has the same
 length and line breaks as the text, and a literal leaves one quote mark; an
 unterminated literal is not a literal; a regex literal over 5,000
-characters is not read as one; every character is walked a bounded number of
-times, however many slashes a line holds; a RecursionError from absurd nesting
+characters is not read as one; a failed literal attempt is not
+repeated (a kind that reaches the end of the file is dropped, a regex
+that fails ends regex attempts for its line), a backslash never escapes
+past the end of a single-line string, so every character is walked a
+bounded number of times; a RecursionError from absurd nesting
 sets broken instead of raising; comments nest in Rust, Swift and Kotlin.
 Never change without a decision: the language names and the blanking rule
 (newlines kept, offsets unchanged), which every line number depends on.
@@ -64,6 +67,8 @@ class Scan:
         self.notes: List[str] = []
         self.broken = False
         self.skip: Dict[int, int] = {}
+        self.dead: set = set()
+        self.regex_dead = 0
         self.starts = [0] + [m.end() for m in re.finditer("\n", text)]
         if lang in ("csharp", "swift"):
             self.blank_directives()
@@ -250,9 +255,12 @@ class Scan:
     def quoted(self, i: int, close: str, interp: Optional[str] = None, multi: bool = False,
                escapes: bool = True, interp_close: str = "}") -> int:
         t, n = self.t, self.n
+        key = (close, interp, multi)
+        if key in self.dead:
+            return -1
         while i < n:
             if escapes and t[i] == "\\":
-                i += 2
+                i += 1 if not multi and t.startswith("\n", i + 1) else 2
             elif t.startswith(close, i):
                 k = i + len(close)
                 if close == '"""':                             # """" ends at the last quote
@@ -265,6 +273,7 @@ class Scan:
                 return i                                       # recover at end of line
             else:
                 i += 1
+        self.dead.add(key)                                     # a failed attempt is not repeated
         return -1
 
     def rust_literal(self, i: int) -> Optional[int]:
@@ -306,7 +315,7 @@ class Scan:
             elif t[j] == '"':
                 return j + 1
             elif t[j] == "\\" and not verbatim:
-                j += 2
+                j += 1 if t.startswith("\n", j + 1) else 2
             elif t[j] == "\n" and not verbatim:
                 return j
             elif dollars and t[j] == "{" and not t.startswith("{{", j):
@@ -317,7 +326,7 @@ class Scan:
 
     def js_slash(self, i: int) -> Optional[int]:
         """A regex literal at i (JS only), or None for a division sign."""
-        if self.lang != "js":
+        if self.lang != "js" or i < self.regex_dead:
             return None
         p, word = self.prev_code(i)
         if p == "<" or (p and (p.isalnum() or p in "_$)]}") and word not in _JS_REGEX_KW):
@@ -326,7 +335,7 @@ class Scan:
         end = min(self.n, i + _REGEX_MAX)
         while j < end and t[j] != "\n":
             if t[j] == "\\":
-                j += 2
+                j += 1 if t.startswith("\n", j + 1) else 2
                 continue
             if t[j] == "[":
                 in_class = True
@@ -335,6 +344,8 @@ class Scan:
             elif t[j] == "/" and not in_class:
                 return j + 1
             j += 1
+        nl = t.find("\n", i)
+        self.regex_dead = self.n if nl == -1 else nl           # no more regex attempts on this line
         return None
 
 
