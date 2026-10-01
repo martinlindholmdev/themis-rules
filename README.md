@@ -13,11 +13,15 @@ the rules are text the agent reads.
 
 ## Install
 
-From inside the target repository:
+From inside the target repository (a fixed `/tmp/themis` path collides when
+more than one install runs at once, so use `mktemp -d`, and verify the tag
+actually checked out before trusting anything in it):
 
 ```
-git clone --depth 1 --branch v3 https://github.com/martinlindholmdev/themis-rules /tmp/themis
-python3 /tmp/themis/install.py install
+THEMIS_SRC=$(mktemp -d)
+git clone --depth 1 --branch v3 https://github.com/martinlindholmdev/themis-rules "$THEMIS_SRC"
+git -C "$THEMIS_SRC" describe --tags --exact-match  # must print v3
+python3 "$THEMIS_SRC/install.py" install
 ```
 
 Or tell your agent: "Install Themis from
@@ -83,8 +87,9 @@ three commands:
 - `status` reports what is installed, which hook mechanism is wired up, and
   which file extensions are and are not measured. A repository with no
   recognised source files fails loudly rather than reporting clean.
-- `rebaseline` records the current sizes as the new ceiling. Owner only;
-  `install.py` runs it once on a new install.
+- `rebaseline` records the current sizes as the new ceiling. Owner only; a
+  new install computes this once itself and shows it in the plan, rather
+  than running the command as a separate, unshown step.
 
 `install.py` stays in this repository and is never copied. It writes the
 checker, the hook, `themis.json` and the rules block in `AGENTS.md`; wires
@@ -107,19 +112,26 @@ matrix, with sources and check dates, is in
 
 When a GitHub remote is present, `install` offers
 `.github/workflows/themis.yml`: a job named `themis` that runs
-`themis.py check --range <base>...<head>` on a pull request and a
-whole-tree `themis.py check` on a push, with full history and no `paths:`
-filter. Mark it a required status check in the repository's branch
-protection settings; that is what makes it a backstop rather than advice.
+`themis.py check --range <base>...<head>` on a pull request and the same
+range check against the commit before the push on an ordinary push. A
+brand-new branch has no earlier commit to range from, so git's own
+empty-tree hash stands in as the base — the range still scans every line
+of the tree for secrets, never falling back to a bare size/comment check
+with no secret scan. Either way, it is always the *base* commit's own
+copy of the checker that runs, so a change cannot rewrite the checker to
+pass itself. Full history, no `paths:` filter. Mark it a required status
+check in the repository's branch protection settings; that is what makes
+it a backstop
+rather than advice.
 
 ## Updating and uninstalling
 
-Re-run `install` from a newer tag to update the checker, the hook and the
-rules block in place. A repository that is already current prints "nothing
-to change" and writes nothing. `python3 tools/themis.py status` reports the
-installed version. `python3 /tmp/themis/install.py uninstall` removes
-exactly what `install` added and prints the `git add` and `git commit`
-commands for the result.
+Re-run `install` from a newer tag (the same `mktemp -d` clone above) to
+update the checker, the hook and the rules block in place. A repository
+that is already current prints "nothing to change" and writes nothing.
+`python3 tools/themis.py status` reports the installed version.
+`python3 "$THEMIS_SRC/install.py" uninstall` removes exactly what `install`
+added and prints the `git add` and `git commit` commands for the result.
 
 ## Name
 

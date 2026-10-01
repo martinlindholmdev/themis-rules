@@ -35,9 +35,11 @@ already asked for a commit (e.g. "install Themis and commit it").
 
 Safety rules, unchanged by any flag:
 - Nothing is written outside the target repo's working tree, except the
-  separate `install.py machine` step, which only touches the owner's own
+  separate `install.py machine` step (which only touches the owner's own
   per-user config files, shows each one, and always asks on a TTY —
-  `--yes` never applies there.
+  `--yes` never applies there) and a worktree's shared hook file, which
+  legitimately lives in the main repo's `.git` directory, not the
+  worktree's own.
 - `install` never deletes data or files it did not itself add, never
   force-pushes, never skips a hook, and never raises a baseline number.
 - If `.git` is read-only in this sandbox, `install` still writes the repo

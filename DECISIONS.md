@@ -31,3 +31,20 @@ there. `tools/themis.py` and `install.py` never raise this file, and
   request, so a change that rewrites the checker to always pass (or a
   key pushed straight to a branch) is still caught by the version that
   existed before that change.
+- Every write, delete and chmod refuses any symlink component, even one
+  that resolves back inside the repo, and any control character in a
+  path; reads use the same rule (`read_text(root, rel)`), so a symlinked
+  file or parent is treated as absent and never shown, copied or parsed.
+  The checker's own `baseline_path` is confined the same way.
+- `check --range` diffs two-dot, not three-dot, because CI's stand-in
+  base for a branch with no earlier commit is git's empty tree, which has
+  no merge-base; a brand-new-branch push therefore scans every line for
+  secrets instead of running a bare size check.
+- A new file `install` creates is shown in full in the plan; only the
+  files whose content is byte-identical to this kit (checker, hook,
+  generated workflow) are summarised with a hash.
+- The Aider adapter edits `read:` only as a block list or bare scalar,
+  adding AGENTS.md on its own marked line; a flow list `[a, b]` is left
+  alone with a note, since its single line cannot be undone cleanly.
+- The machine-mode writers live in `install.py`, the plan-building in
+  `install_plan.py`, to keep both under the 800-line limit.

@@ -6,8 +6,9 @@ copied below between the markers, and `CONTRIBUTING.md`). Layout:
 installs), `docs/install.md` (the agent's view of installing it elsewhere),
 `docs/frameworks.md` (the 17-surface support matrix), `tools/themis.py`
 (the vendored checker, never changed without updating every repo that
-has it), `install.py` (install/machine/uninstall, this repo only), and
-`tests/`.
+has it), `install.py` (the install/machine/uninstall entry points) and
+`install_plan.py` (the plan-building and shared mechanics it calls —
+together with `install.py`, this repo only, never vendored), and `tests/`.
 
 Before committing: `python3 -m unittest discover -s tests` and
 `python3 tools/themis.py status` both clean.

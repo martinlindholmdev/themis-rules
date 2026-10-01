@@ -25,7 +25,7 @@ has no release SLA; expect an acknowledgement, not a guaranteed fix date.
   runs `git commit`; it prints the command. It makes no network requests.
 - The machine-level pointer (`install.py machine`) writes a short,
   read-only instruction (read AGENTS.md, offer once, never run anything)
-  into a handful of per-user agent config files, and only after the owner
+  into up to eight per-user agent config files, and only after the owner
   confirms each file on a TTY. It is not a mechanism for unattended changes
   to anyone's machine.
 
@@ -33,9 +33,22 @@ has no release SLA; expect an acknowledgement, not a guaranteed fix date.
 
 - Sends anything over the network.
 - Executes a file it has not first byte-compared against its own known
-  source.
+  source — this is specifically how the installer's final `status` step
+  decides whether to run the copy of the checker it just wrote; no other
+  step executes anything from the target repository at all.
 - Writes outside the target repository's working tree, except the machine
-  step above, which the owner confirms file by file.
+  step above (which the owner confirms file by file) and a worktree's
+  shared hook file, which legitimately lives in the main repository's
+  `.git` directory, not the worktree's own.
 - Force-pushes, deletes data, or skips a hook on your behalf.
 - Raises a size baseline on its own. Only the repository owner does that,
   by hand, with `python3 tools/themis.py rebaseline`.
+
+## For repositories that install Themis
+
+The CI backstop (`.github/workflows/themis.yml`) only protects a branch
+that is itself protected: a pull request can edit the workflow file in
+the same change it is meant to check. Add a `CODEOWNERS` entry for
+`.github/workflows/` requiring review from someone who is not the PR's
+author, so a workflow change needs a second set of eyes before it can
+weaken what the backstop checks.
