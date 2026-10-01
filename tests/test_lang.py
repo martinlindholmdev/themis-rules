@@ -1,5 +1,5 @@
 """Purpose: check that themis_lang.py measures function length and reads
-comments in the seven brace languages, and that the five holes a design
+comments in the seven brace languages (the scanner loads beside it), and that the five holes a design
 review found in the prototype stay closed.
 Entry points: run by `python3 -m unittest discover -s tests`.
 Invariants: pure strings in, no filesystem or git involved beyond loading
@@ -10,7 +10,9 @@ are what an owner would notice changing, and the one-second bound.
 
 import importlib.util
 import re
+import shutil
 import sys
+import tempfile
 import time
 import unittest
 from pathlib import Path
@@ -183,14 +185,15 @@ public class C : Base {
 }
 '''
 # source, extension, measured sizes. The TS and Kotlin entries include the
-# anonymous block outside any function (describe, `fun one() = api.call {`).
+# anonymous blocks outside any function: the `it` callback and the describe
+# wrapper's own two lines, and `fun one() = api.call {`.
 LANGUAGES = {
     "rust": (RUST, ".rs", {"pick": 6, "Wrap.next": 4, "tests.it_works": 3}),
     "go": (GO, ".go", {"Server.Handle": 9, "Free": 3}),
     "swift": (SWIFT, ".swift", {"V.body": 3, "V.init": 3, "V.`default`": 1, "V.make": 4,
                                 "V.deinit": 2, "P.count": 1}),
     "ts": (TS, ".ts", {"parse": 5, "handler": 5, "Store.size": 3, "Store.load": 5,
-                       "<anonymous>#1": 3}),
+                       "<anonymous>#1": 1, "<anonymous>#2": 2}),
     "java": (JAVA, ".java", {"A.toString": 8, "A.A": 8, "A.A.Runnable.run": 1}),
     "kotlin": (KOTLIN, ".kt", {"Repo.`doesn't crash on empty`": 4, "Repo.one": 3,
                                "Repo.companion object.create": 3}),
@@ -246,6 +249,16 @@ class ReviewHoleTests(unittest.TestCase):
             with self.subTest(ext=ext):
                 self.assertGreater(lang.functions(source, ext)[0].get(key, 0), 100)
 
+    def test_a_wrapper_of_short_callbacks_is_not_one_long_function(self):
+        tests = "".join('  it("t%d", () => {\n    a()\n    b()\n  })\n' % i for i in range(40))
+        sizes, _ = lang.functions('describe("suite", () => {\n%s})\n' % tests, ".ts")
+        self.assertEqual(len(sizes), 41)
+        self.assertLess(max(sizes.values()), 10)
+
+    def test_one_long_anonymous_callback_is_measured_in_full(self):
+        source = "app.get('/', (req, res) => {\n%s\n})\n" % BODY
+        self.assertEqual(lang.functions(source, ".ts")[0], {"<anonymous>#1": 122})
+
     def test_a_closure_inside_a_function_counts_toward_it(self):
         source = "func F() {\n  go func() {\n%s\n  }()\n}\n" % BODY
         sizes, _ = lang.functions(source, ".go")
@@ -285,6 +298,24 @@ class ReviewHoleTests(unittest.TestCase):
         self.assertEqual(lang.test_spans(prod, ".rs"), [])
         exact = "fn a() {}\n#[cfg(test)]\n#[allow(dead_code)]\npub mod t {\n}\n"
         self.assertEqual(lang.test_spans(exact, ".rs"), [(2, 5)])
+
+
+class LoadingTests(unittest.TestCase):
+    def test_loading_by_path_leaves_no_bytecode_folder(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            for name in ("themis_lang.py", "themis_scan.py"):
+                shutil.copy(TOOLS / name, tmp)
+            spec = importlib.util.spec_from_file_location("copy_lang", Path(tmp) / "themis_lang.py")
+            spec.loader.exec_module(importlib.util.module_from_spec(spec))
+            self.assertEqual(sorted(p.name for p in Path(tmp).iterdir()),
+                             ["themis_lang.py", "themis_scan.py"])
+
+    def test_a_missing_sibling_is_one_clear_error(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            shutil.copy(TOOLS / "themis_lang.py", tmp)
+            spec = importlib.util.spec_from_file_location("lonely", Path(tmp) / "themis_lang.py")
+            with self.assertRaisesRegex(ImportError, "themis_scan.py"):
+                spec.loader.exec_module(importlib.util.module_from_spec(spec))
 
 
 class HistoryTests(unittest.TestCase):
