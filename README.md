@@ -28,7 +28,7 @@ themis: FAIL, 2 problem(s)
 | Comment style | Flags supported history-style patterns in comments. |
 | Secrets | Rejects added lines matching common credential patterns. |
 
-The other rules in [RULES.md](RULES.md) hold only because the agent reads them. Secret detection is pattern-based and is not a complete scanner; run a dedicated tool such as [gitleaks](https://github.com/gitleaks/gitleaks) alongside it. A local hook can be skipped, so protected CI is the backstop. It is not a code reviewer or a workflow framework. Full behaviour is in [docs/checks.md](docs/checks.md).
+The other rules in [RULES.md](RULES.md) hold only because the agent reads them. Secret detection is pattern-based and is not a complete scanner; run a dedicated tool such as [gitleaks](https://github.com/gitleaks/gitleaks) alongside it. A local hook can be skipped, so protected CI is the backstop. Themis is not a code reviewer or a workflow framework. Full behaviour is in [docs/checks.md](docs/checks.md).
 
 ## Install
 
