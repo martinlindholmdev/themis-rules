@@ -70,6 +70,24 @@ class RangeCheckTests(unittest.TestCase):
             self.assertIn("looks like an OpenAI-shaped key", result.stdout)
             self.assertNotIn(secret, result.stdout)
 
+    def test_range_notes_when_the_checker_itself_changed(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp) / "repo"
+            repo.mkdir()
+            init_repo(repo)
+            (repo / "tools").mkdir()
+            (repo / "tools" / "themis.py").write_bytes(THEMIS.read_bytes())
+            (repo / "themis.json").write_text('{"version": "v3"}\n', encoding="utf-8")
+            (repo / "main.py").write_text("def add(a, b):\n    return a + b\n", encoding="utf-8")
+            commit_all(repo, "base")
+            base = subprocess.run(["git", "-C", str(repo), "rev-parse", "HEAD"],
+                                   check=True, capture_output=True, text=True).stdout.strip()
+            (repo / "tools" / "themis.py").write_text(THEMIS.read_text(encoding="utf-8") + "\n", encoding="utf-8")
+            commit_all(repo, "touch the checker")
+
+            result = run(repo, str(repo / "tools" / "themis.py"), "check", "--range", base + "...HEAD")
+            self.assertIn("tools/themis.py changed; owner only", result.stdout)
+
 
 class NonAsciiTests(unittest.TestCase):
     def test_a_non_ascii_filename_is_measured(self):

@@ -34,6 +34,20 @@ class MachineTableTests(unittest.TestCase):
             present = [name for name, config_dir, _ in install.machine_table(home) if config_dir.is_dir()]
             self.assertEqual(present, ["Claude Code"])
 
+    def test_xdg_config_home_is_honoured_for_config_paths(self):
+        home = Path("/fake/home")
+        with mock.patch.dict("os.environ", {"XDG_CONFIG_HOME": "/custom/config"}):
+            table = dict((name, path) for name, _, path in install.machine_table(home))
+        self.assertEqual(table["Goose"], Path("/custom/config/goose/.goosehints"))
+        self.assertEqual(table["Amp"], Path("/custom/config/amp/AGENTS.md"))
+
+    def test_zed_on_windows_uses_appdata_not_dot_config(self):
+        home = Path("/fake/home")
+        with mock.patch.dict("os.environ", {"APPDATA": "C:\\Users\\t\\AppData\\Roaming"}), \
+             mock.patch("sys.platform", "win32"):
+            table = dict((name, path) for name, _, path in install.machine_table(home))
+        self.assertEqual(table["Zed"], Path("C:\\Users\\t\\AppData\\Roaming") / "Zed" / "AGENTS.md")
+
 
 class WriteMachineFileTests(unittest.TestCase):
     def test_confirmed_write_creates_the_pointer_file(self):

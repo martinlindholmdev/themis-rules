@@ -17,9 +17,11 @@ every repo-specific value comes from `themis.json`, read fresh each run;
 "0 files measured" fails loudly; this script's own vendored copy is never
 counted; a size or function limit may shrink, never grow; a matched
 secret is never printed, only its file, line and shape; git always runs
-with quotepath off, so non-ASCII filenames are measured; `--staged` and
-`--range` enforce against the config and baseline already committed, so
-editing either in the same commit or range does nothing.
+with quotepath off, so non-ASCII filenames are measured; `--staged`
+enforces the config already on HEAD and the baseline already staged (or,
+failing that, on HEAD) — never an unstaged edit on disk — so editing
+either in the same commit does nothing; `--range A...B` does the same
+against A.
 Never change without a decision: the two hard limits, the marker text,
 the themis.json field names, and the secret pattern list — this script is
 vendored byte-for-byte into every repo that installs it.
@@ -89,13 +91,17 @@ SECRET_PATTERNS: List[Tuple[str, "re.Pattern[str]"]] = [
 ]
 ALLOW_MARKER = "themis: allow-secret"
 
+#: git always writes UTF-8; decoding with the platform default (cp1252 on
+#: a plain Windows console) silently mangles a non-ASCII filename instead
+#: of raising, so every git call below decodes as UTF-8 explicitly.
 def git_root() -> Path:
     cmd = ["git", "rev-parse", "--show-toplevel"]
-    return Path(subprocess.run(cmd, check=True, capture_output=True, text=True).stdout.strip())
+    out = subprocess.run(cmd, check=True, capture_output=True, encoding="utf-8", errors="replace").stdout
+    return Path(out.strip())
 
 def _git(root: Path, *args: str) -> str:
     cmd = ["git", "-c", "core.quotepath=off", "-C", str(root)] + list(args)
-    return subprocess.run(cmd, check=True, capture_output=True, text=True).stdout
+    return subprocess.run(cmd, check=True, capture_output=True, encoding="utf-8", errors="replace").stdout
 
 def _with_defaults(data: dict) -> dict:
     data.setdefault("version", None)
@@ -299,6 +305,20 @@ def load_baseline(root: Path, config: dict, ref: Optional[str] = None) -> dict:
         text = read(root, config["baseline_path"], ref)
     except (FileNotFoundError, subprocess.CalledProcessError):
         return {"files": {}, "functions": {}, "history_words": {}}
+    return _parsed_baseline(text)
+
+def load_baseline_staged(root: Path, config: dict) -> dict:
+    """check --staged must ratchet against what is actually staged (or,
+    failing that, committed) — never an unstaged edit on disk, or
+    `rebaseline` without `git add` would silently widen the baseline."""
+    for ref in (":", "HEAD"):
+        try:
+            return _parsed_baseline(read(root, config["baseline_path"], ref))
+        except subprocess.CalledProcessError:
+            continue
+    return {"files": {}, "functions": {}, "history_words": {}}
+
+def _parsed_baseline(text: str) -> dict:
     data = json.loads(text)
     data.setdefault("files", {})
     data.setdefault("functions", {})
@@ -455,20 +475,29 @@ def hooks_dir(root: Path) -> Tuple[Path, str]:
 
 def hook_status(root: Path) -> str:
     """Every place a hook manager can hide its real hook, so a husky- or
-    lefthook-generated .git/hooks/pre-commit is never mistaken for off."""
-    for label, path in (
-        ("husky (.husky/pre-commit)", root / ".husky" / "pre-commit"),
-        ("lefthook (lefthook.yml)", root / "lefthook.yml"),
-        ("lefthook (lefthook.yaml)", root / "lefthook.yaml"),
-        ("pre-commit framework (.pre-commit-config.yaml)", root / ".pre-commit-config.yaml"),
-    ):
-        if path.exists():
-            text = path.read_text(encoding="utf-8", errors="replace")
-            return ("%s — on" % label if SELF_NAME in text
-                    else "%s found but does not call %s — off" % (label, SELF_NAME))
+    lefthook-generated .git/hooks/pre-commit is never mistaken for off —
+    but naming themis.py in the manager's own file is not enough: the
+    manager must actually be installed in this clone (its shim present
+    at the git-resolved hooks path), or no commit ever runs it."""
+    managers = (
+        ("husky (.husky/pre-commit)", root / ".husky" / "pre-commit", "npx husky"),
+        ("lefthook (lefthook.yml)", root / "lefthook.yml", "lefthook install"),
+        ("lefthook (lefthook.yaml)", root / "lefthook.yaml", "lefthook install"),
+        ("pre-commit framework (.pre-commit-config.yaml)", root / ".pre-commit-config.yaml", "pre-commit install"),
+    )
     hooks_path, location = hooks_dir(root)
     hook_path = hooks_path / "pre-commit"
-    if not hook_path.is_file():
+    installed = hook_path.is_file()
+    for label, path, install_cmd in managers:
+        if not path.exists():
+            continue
+        text = path.read_text(encoding="utf-8", errors="replace")
+        if SELF_NAME not in text:
+            return "%s found but does not call %s — off" % (label, SELF_NAME)
+        if not installed:
+            return "%s calls %s, but it is not installed in this clone (run `%s`) — off" % (label, SELF_NAME, install_cmd)
+        return "%s — on" % label
+    if not installed:
         return "%s; no pre-commit file there — the hook will not run" % location
     text = hook_path.read_text(encoding="utf-8", errors="replace")
     if SELF_NAME in text:
@@ -526,16 +555,22 @@ def run_tree(root: Path, config: dict) -> int:
     found, _ = run_checks(root, paths, None, baseline, config)
     return _report(found.notes, found.problems, "themis: pass, %d file(s) checked" % len(paths))
 
+def _self_change_note(root: Path, diff_args: Tuple[str, ...]) -> List[str]:
+    if SELF_PATH in changed_paths(root, *diff_args):
+        return ["%s changed; owner only — a PR's own copy is never what CI "
+                 "checks it with, but review this by hand too" % SELF_PATH]
+    return []
+
 def run_staged(root: Path, config: dict) -> int:
     config, config_changed = enforcement_config(root, config, "HEAD", ("--cached",))
-    notes: List[str] = []
+    notes: List[str] = list(_self_change_note(root, ("--cached",)))
     if config_changed:
         notes.append("%s changed; owner only — this commit is still checked "
                       "against the version already on HEAD" % CONFIG_NAME)
     blocking = secret_problems(root, "--cached") + baseline_problems(root, config, "HEAD", ":", ("--cached",))
     paths = staged_files(root, config)
     if paths:
-        baseline = load_baseline(root, config)
+        baseline = load_baseline_staged(root, config)
         found, _ = run_checks(root, paths, ":", baseline, config)
         notes += found.notes
         blocking += found.problems
@@ -551,7 +586,7 @@ def run_range(root: Path, config: dict, range_arg: str) -> int:
     a, b = range_arg.split("...", 1)
     span = a + "..." + b
     config, config_changed = enforcement_config(root, config, a, (span,))
-    notes: List[str] = []
+    notes: List[str] = list(_self_change_note(root, (span,)))
     if config_changed:
         notes.append("%s changed between %s and %s; owner only — this range is "
                       "still checked against the version at %s" % (CONFIG_NAME, a, b, a))
@@ -567,6 +602,10 @@ def run_range(root: Path, config: dict, range_arg: str) -> int:
     return _report(notes, blocking, "themis: pass, %d file(s) checked at %s" % (len(paths), b))
 
 def main(argv: Optional[List[str]] = None) -> int:
+    # a path this process cannot even print (an unmappable console code
+    # page) must not crash the hook outright — replace, don't raise.
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(errors="replace")
     parser = argparse.ArgumentParser(prog="themis.py", description=__doc__.splitlines()[0])
     sub = parser.add_subparsers(dest="command", required=True)
     p_check = sub.add_parser("check", help="check the whole tree, staged files, or a commit range")

@@ -45,8 +45,7 @@ opencode.ai/docs/rules, opencode.ai/docs/permissions.
 
 **Goose** — (a) `AGENTS.md` then `.goosehints`, nested per directory,
 names set by `CONTEXT_FILE_NAMES`. (b) `~/.config/goose/.goosehints`
-(**not** `AGENTS.md` — the only place the original design doc guessed
-wrong). (c) no sandbox; default Auto mode approves every tool call.
+(**not** `AGENTS.md`). (c) no sandbox; default Auto mode approves every tool call.
 (d) not documented. (e) `GOOSE_MODE` manual/smart approval; no
 per-command rules. (f) native read; the hook is the only real backstop
 in Auto mode. Source: goose-docs.ai/docs/guides/context-engineering/using-goosehints,
@@ -109,11 +108,13 @@ approval; a YOLO mode; no sandbox documented around `.git`. (d) not
 documented; it keeps checkpoints in a shadow repo under
 `~/.gemini/history`. (e) not documented. (f) a `GEMINI.md` with
 `@AGENTS.md` (appended if the file exists), or set `context.fileName` to
-include `AGENTS.md` directly. **Since 2026-06-18, Gemini CLI no longer
-serves personal Google accounts** (free, AI Pro or AI Ultra) — it points
-them to Google Antigravity instead; API-key users are unaffected
-(github.com/google-gemini/gemini-cli issue #28229). Source:
-geminicli.com/docs/cli/gemini-md.
+include `AGENTS.md` directly. **User-reported, unconfirmed by a
+maintainer:** a single GitHub issue, opened 2026-07-01 and without a
+maintainer reply as of this check, reports that Gemini CLI stopped
+serving personal Google accounts (free, AI Pro or AI Ultra) around
+2026-06-18, pointing them to Google Antigravity instead; API-key users
+are reportedly unaffected (github.com/google-gemini/gemini-cli issue
+#28229). Source: geminicli.com/docs/cli/gemini-md.
 
 **Google Antigravity (`agy`)** — the terminal counterpart to the
 Antigravity 2.0 desktop app, and personal-account Gemini CLI users'
@@ -141,6 +142,14 @@ antigravity.google/docs/settings, antigravity.google/docs/sandbox;
 secondary: agenticcontrolplane.com/controls/antigravity,
 agenticcontrolplane.com/blog/antigravity-permissions-reference.
 
+> **Headless Antigravity needs an explicit allow-rule.** Running
+> `agy -p "install Themis..."` unattended (no one at a terminal to
+> approve anything) does nothing unless the shell commands `install.py`
+> runs are already allow-listed under `permissions.allow` in
+> `~/.gemini/antigravity-cli/settings.json` — a release test saw the
+> command silently auto-denied with no output. Either add the allow
+> rule first, or run the install interactively so a person approves it.
+
 **Aider** — (a) reads nothing automatically; needs `read: AGENTS.md` in
 `.aider.conf.yml`, or `--read`. (b) `~/.aider.conf.yml`. (c) shell, and
 it auto-commits its own edits. (d) **skips hooks by default** —
@@ -150,6 +159,15 @@ config. (f) when `.aider.conf.yml` already exists, Themis adds
 `read: AGENTS.md` and `git-commit-verify: true` to it (never creates the
 file — that would turn Aider on for a repo that isn't using it). Source:
 aider.chat/docs/usage/conventions.html, aider.chat/docs/git.html.
+
+> **Aider cannot drive the install itself.** A release test with a small
+> local model (gpt-oss-20b) could not get Aider to run `install.py` on
+> its own behalf — point a human, or a different agent, at it instead
+> and have Aider only read the result (`read: AGENTS.md`). Separately:
+> `--yes-always` combined with a URL appearing in the prompt has been
+> observed making Aider auto-install Playwright, Chromium and pandoc
+> (it fetches and renders the URL). Avoid `--yes-always` when pasting a
+> Themis install URL into an Aider prompt, or pass `--no-detect-urls`.
 
 **Cline** — (a) reads `AGENTS.md` and `~/.agents/AGENTS.md`; prefers a
 `.clinerules/` folder when present. (b) `~/Documents/Cline/Rules` (also
@@ -212,33 +230,52 @@ Copy the relevant snippet into that agent's own config alongside
 Themis's git hook — none of these replace the CI backstop, they only
 narrow the window before it catches a skipped hook.
 
-**Claude Code** (`.claude/settings.json`, a `PreToolUse` hook):
+**Claude Code** (`.claude/settings.json`, a `PreToolUse` hook). The hook
+command receives the tool call as **JSON on stdin** (there is no
+`$CLAUDE_TOOL_INPUT` environment variable), and only **exit code 2**
+blocks the call — exit 1 is reported but does not stop it:
 ```json
 {
   "hooks": {
     "PreToolUse": [{
       "matcher": "Bash",
-      "hooks": [{"type": "command", "command": "case \"$CLAUDE_TOOL_INPUT\" in *--no-verify*|*hooksPath*) exit 1;; esac"}]
+      "hooks": [{"type": "command", "command": "python3 .claude/hooks/block-hook-skip.py"}]
     }]
   }
 }
 ```
-
-**Codex** (`~/.codex/rules`, a `prefix_rule`):
+```python
+# .claude/hooks/block-hook-skip.py
+import json, re, sys
+command = json.load(sys.stdin).get("tool_input", {}).get("command", "")
+if re.search(r"--no-verify|core\.hooksPath", command):
+    print("blocked: looks like a hook-skip attempt", file=sys.stderr)
+    sys.exit(2)
 ```
-prefix_rule "git commit" allow
-prefix_rule "git commit --no-verify" deny
-prefix_rule "git -c core.hooksPath" deny
+
+**Codex** (`~/.codex/rules`, Starlark `prefix_rule`, not shell text):
+```python
+prefix_rule(pattern=["git", "commit", "--no-verify"], decision="forbidden")
+prefix_rule(pattern=["git", "-c", "core.hooksPath"], decision="forbidden")
 ```
 
-**Cursor** (`.cursor/hooks.json`, `beforeShellExecution`):
+**Cursor** (`.cursor/hooks.json`, `beforeShellExecution`). There is no
+declarative deny list — the hook is a script that receives the command
+as JSON on stdin and must itself print a decision:
 ```json
-{"beforeShellExecution": {"deny": ["git commit --no-verify", "git -c core.hooksPath=*"]}}
+{"version": 1, "hooks": {"beforeShellExecution": [{"command": "./deny-hook-skip.sh"}]}}
+```
+```sh
+#!/bin/sh
+# .cursor/deny-hook-skip.sh
+if grep -Eq -- '--no-verify|core\.hooksPath' <&0; then echo '{"permission":"deny"}'; fi
 ```
 
-**Zed** (`settings.json`, `agent.tool_permissions`):
+**Zed** (`settings.json`), under `agent.tool_permissions.tools.terminal.always_deny`,
+a list of `{"pattern": ...}` objects, not bare strings:
 ```json
-{"agent": {"tool_permissions": {"always_deny": ["--no-verify", "core\\.hooksPath"]}}}
+{"agent": {"tool_permissions": {"tools": {"terminal": {"always_deny":
+  [{"pattern": "--no-verify"}, {"pattern": "core\\.hooksPath"}]}}}}}
 ```
 
 **OpenCode** (`opencode.json`, `permission.bash`):
@@ -249,10 +286,11 @@ prefix_rule "git -c core.hooksPath" deny
 **Goose** — no per-command rule exists; run it in `GOOSE_MODE=manual` for
 a repo where a skipped hook would matter.
 
-**Windsurf** (Cascade settings, `cascadeCommandsDenyList`):
-```json
-{"cascadeCommandsDenyList": ["git commit --no-verify", "git -c core.hooksPath=*"]}
-```
+**Windsurf** — no documented denylist key was found on the memories page
+this matrix otherwise cites; rather than guess at one, configure command
+permissions directly in Cascade's settings panel per
+docs.devin.ai/desktop/cascade/agents-md and the sandboxing/permissions
+pages linked from it.
 
 ## A note on fresh clones
 

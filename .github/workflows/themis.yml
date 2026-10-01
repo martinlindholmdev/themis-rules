@@ -1,0 +1,44 @@
+name: themis
+on:
+  pull_request:
+  push:
+permissions:
+  contents: read
+jobs:
+  themis:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7.0.0
+        with:
+          python-version: "3.x"
+      - name: themis check
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            BASE="${{ github.event.pull_request.base.sha }}"
+          else
+            BASE="${{ github.event.before }}"
+          fi
+          HEAD="${{ github.sha }}"
+          ZERO="0000000000000000000000000000000000000000"
+          if [ -z "$BASE" ] || [ "$BASE" = "$ZERO" ]; then
+            # a brand-new branch has nothing to diff against (push) or
+            # this PR itself installs Themis (no base copy yet) — a
+            # whole-tree check at HEAD is all there is to run.
+            python3 tools/themis.py check
+            exit $?
+          fi
+          # run the BASE commit's own copy of the checker, never the one
+          # on this branch — otherwise a change that neuters
+          # tools/themis.py (on a PR, or pushed straight to a branch)
+          # checks itself and passes. check --range also scans every
+          # added line between BASE and HEAD for secrets, on push too.
+          if git cat-file -e "$BASE:tools/themis.py" 2>/dev/null; then
+            git show "$BASE:tools/themis.py" > "$RUNNER_TEMP/themis_base.py"
+          else
+            cp tools/themis.py "$RUNNER_TEMP/themis_base.py"
+          fi
+          python3 "$RUNNER_TEMP/themis_base.py" check --range "$BASE...$HEAD"

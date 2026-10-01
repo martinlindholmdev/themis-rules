@@ -67,5 +67,5 @@ Start with `python3 tools/themis.py status`: it lists what is on.
 
 ## Standing permissions
 - New libraries without asking: no
-- Live for real people or data: yes
-- Second-model reviewer: ask the owner later
+- Live for real people or data: no
+- Second-model reviewer: GPT-5.1 (a different model family than the one building)

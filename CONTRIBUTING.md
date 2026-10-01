@@ -15,10 +15,11 @@ vendored byte-for-byte into every repo that installs Themis — a behaviour
 change there is an upgrade for all of them, so it needs a test in
 `tests/`, not just a passing `status`.
 
-Scope: `tools/themis.py` stays under 600 lines and standard-library only
-(no network, no dependencies — it is copied into other people's repos
-verbatim). `install.py` stays under 800 lines, no function over 100
-lines, and runs only in this repo, never vendored.
+Scope: `tools/themis.py` stays well under its 800-line hard limit and
+standard-library only (no network, no dependencies — it is copied into
+other people's repos verbatim). `install.py` (the CLI entry points) and
+`install_plan.py` (the plan-building it calls) each stay under 800 lines,
+no function over 100 lines, and run only in this repo, never vendored.
 
 Small, focused changes reviewed by a different model are preferred over
 large ones. See `RULES.md` rule 10 for what counts as small.
