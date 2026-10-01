@@ -261,37 +261,45 @@ class ReviewHoleTests(unittest.TestCase):
                 sizes, _ = lang.functions(template % BODY, ext)
                 self.assertGreater(sizes.get(key, 0), 100)
 
+    # openers that can fail to close, alone and followed by a backslash
     HOSTILE = {
         ".rs": ['"', 'r#"', 'b"', "'", "/*", "/*/*"],
         ".go": ["`", '"', "'", "/*"],
-        ".swift": ['#"', '"""', '"', "\\(", "/*", "#/"],
+        ".swift": ['#"', '"""', '"', "\\(", "/*", "#/", "#", "`"],
         ".kt": ['"""', '"${', '"', "`", "/*"],
         ".java": ['"""', '"', "'", "/*"],
         ".cs": ['@"', '$"', '$@"', '"""', '"', "/*"],
         ".ts": ["`", "`${", '"', "'", "/[", "/", "/*", "/ "],
     }
-
     @staticmethod
     def hostile_source(unit, size, many_lines):
+        end = "" if unit.endswith("\n") else "\n"
         if many_lines:
-            row = unit * (80 // len(unit) + 1) + "\n"
+            row = unit * (80 // len(unit) + 1) + end
             return "var " + row * (size // len(row) + 1)
-        return "var " + unit * (size // len(unit)) + "\n"
+        return "var " + unit * (size // len(unit)) + end
+
+    def timed(self, ext, unit, size, many_lines):
+        source = self.hostile_source(unit, size, many_lines)
+        start = time.time()
+        lang.analyse(source, ext)
+        return time.time() - start
 
     def test_hostile_input_is_scanned_in_linear_time(self):
         for ext, units in self.HOSTILE.items():
             for unit in units:
                 for variant in (unit, unit + "\\"):
                     for many_lines in (False, True):
-                        times = []
-                        for size in (32000, 128000):
-                            source = self.hostile_source(variant, size, many_lines)
-                            start = time.time()
-                            lang.analyse(source, ext)
-                            times.append(time.time() - start)
+                        small, large = (self.timed(ext, variant, size, many_lines) for size in (32000, 128000))
                         with self.subTest(ext=ext, unit=variant, many_lines=many_lines):
-                            self.assertLess(times[1], 1.0)
-                            self.assertLess(times[1], 6 * max(times[0], 0.05))
+                            self.assertLess(large, 1.0)
+                            self.assertLess(large, 6 * max(small, 0.05))
+
+    def test_repeated_backtick_identifiers_stay_linear_at_a_megabyte(self):
+        for ext in (".swift", ".kt"):
+            mid, big = (self.timed(ext, "`x`;", size, False) for size in (256000, 1000000))
+            with self.subTest(ext=ext):
+                self.assertTrue(big < 0.5 or big < 5 * mid, (mid, big))
 
     def test_regex_and_division_blank_the_same_spans(self):
         sample = "const r = /[/]x/g, q = a / b / c; // note\nreturn /y/.test(q)\n"

@@ -53,6 +53,8 @@ _DIRECTIVE_WORDS = {"if", "ifdef", "ifndef", "else", "elif", "elseif", "endif", 
                     "endregion", "pragma", "define", "undef", "line", "nullable", "warning", "error"}
 _NON_NEWLINE = re.compile(r"[^\n]")
 _REGEX_MAX = 5000
+_IDENT_MAX = 256
+_HASH_RUN = re.compile("#*")
 
 
 class Scan:
@@ -69,6 +71,7 @@ class Scan:
         self.skip: Dict[int, int] = {}
         self.dead: set = set()
         self.regex_dead = 0
+        self.hash_skip = 0
         self.starts = [0] + [m.end() for m in re.finditer("\n", text)]
         if lang in ("csharp", "swift"):
             self.blank_directives()
@@ -211,9 +214,8 @@ class Scan:
         t, lang, c = self.t, self.lang, self.t[i]
         start, j = i, None
         if c == "`" and lang in ("kotlin", "swift"):           # `identifier`, kept as code
-            nl = t.find("\n", i)
-            end = t.find("`", i + 1, self.n if nl == -1 else nl)
-            return end + 1 if end != -1 else i + 1
+            end = t.find("`", i + 1, min(self.n, i + _IDENT_MAX))
+            return end + 1 if end != -1 and "\n" not in t[i + 1:end] else i + 1
         if lang == "rust":
             j = self.rust_literal(i)
         elif lang == "swift":
@@ -290,8 +292,13 @@ class Scan:
 
     def swift_literal(self, i: int) -> Optional[int]:
         t = self.t
+        if i < self.hash_skip:
+            return None
         m = _SWIFT_STR.match(t, i)
-        if not m or (m.group(2) == "/" and not m.group(1)):
+        if not m:
+            self.hash_skip = _HASH_RUN.match(t, i).end()       # no quote follows this run of #
+            return None
+        if m.group(2) == "/" and not m.group(1):
             return None                                        # bare /regex/ is not read
         hashes, q = m.group(1), m.group(2)
         if q == "/":
