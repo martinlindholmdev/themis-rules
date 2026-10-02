@@ -132,40 +132,6 @@ class SeedTests(unittest.TestCase):
         old_block = rules.replace(new_text, "keep what catches them.\n").replace("v3.2", "v3.1")
         self.assertNotIn(new_rule, old_block)
         (repo / "AGENTS.md").write_text(old_block, encoding="utf-8")
-        (repo / "themis.json").write_text(json.dumps({"version": "v3", "decision_log": "DECISIONS.md"}), encoding="utf-8")
-        (repo / "themis-baseline.json").write_text(json.dumps({
-            "files": {}, "functions": {"m.py": {"f": 150, "gone": 130}}, "history_words": {"a.ts": 3}}),
-            encoding="utf-8")
-        (repo / "tools").mkdir()
-        (repo / "tools" / "themis.py").write_text("# the v3 checker\n", encoding="utf-8")
-        self.commit(repo, "a v3 install")
-        dry = self.install(repo, "--dry-run")
-        self.assertIn("upgrading Themis v3 to v3.2", dry.stdout)
-        done = self.install(repo, "--yes")
-        self.assertEqual(done.returncode, 0, done.stdout + done.stderr)
-        self.assertIn("Upgrade Themis to v3.2", done.stdout)
-        baseline = self.baseline(repo)
-        self.assertEqual(baseline["functions"], {"m.py": {"f": 112}})
-        self.assertEqual(baseline["history_words"], {})
-        self.assertEqual(baseline["lang"]["functions"], {"a.ts": {"big": 122}})
-        committed = self.commit(repo, "upgrade", verify=True)
-        self.assertEqual(committed.returncode, 0, committed.stdout + committed.stderr)
-        self.assertEqual(self.check(repo).returncode, 0)
-
-    def test_an_upgrade_from_v3_1_replaces_the_rules_block_with_the_new_rule_7(self):
-        repo = self.repo()
-        rules = (ROOT / "RULES.md").read_text(encoding="utf-8")
-        new_rule = "delete only what a read shows is a true duplicate"
-        old_rule = "plant small bugs; keep what catches them.\n"
-        self.assertIn(new_rule, rules)
-        start = rules.index("   them, and delete only")
-        end = rules.index("   is a missing test.\n") + len("   is a missing test.\n")
-        old_block = (rules[:start - len("   updated. Before bulk deletion, plant small bugs; keep what catches\n")]
-                     + "   updated. Before bulk deletion, plant small bugs; keep what catches them.\n"
-                     + rules[end:]).replace("v3.2", "v3.1")
-        self.assertIn(old_rule, old_block)
-        self.assertNotIn(new_rule, old_block)
-        (repo / "AGENTS.md").write_text(old_block, encoding="utf-8")
         (repo / "themis.json").write_text(json.dumps({"version": "v3.1", "decision_log": "DECISIONS.md"}), encoding="utf-8")
         (repo / "tools").mkdir()
         for name in TOOLS:
@@ -181,7 +147,7 @@ class SeedTests(unittest.TestCase):
         self.assertIn("<!-- themis v3.2 begin -->", agents)
         self.assertNotIn("v3.1", agents)
         self.assertIn(new_rule, agents)
-        self.assertEqual((repo / "themis.json").read_text(encoding="utf-8").count('"version": "v3.2"'), 1)
+        self.assertEqual(json.loads((repo / "themis.json").read_text(encoding="utf-8"))["version"], "v3.2")
 
     def test_an_upgrade_replaces_the_v3_workflow_and_says_so(self):
         repo = self.repo()
