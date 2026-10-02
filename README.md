@@ -7,7 +7,7 @@
 
 **Named for the Greek goddess of law and order. Built to keep AI-written code in line.**
 
-Themis gives AI coding agents a shared set of repository rules, backed by a small Python checker. A Git hook checks file and function size, flags history-style comments, requires a header on every new source file, and catches common secret patterns before a commit. An optional CI check provides a second check on proposed changes. Set a test command and a gate runs your own tests on the committed tree in CI and fails on errors, zero tests, too few tests or too many skips.
+Themis gives coding agents a shared set of repository rules, backed by a small Python checker. A Git hook checks file and function size, flags history-style comments, requires a header on every new source file, and catches common secret patterns before a commit. An optional CI check provides a second check on proposed changes. Set a test command and a gate runs your own tests on the committed tree in CI and fails on errors, zero tests, too few tests or too many skips.
 
 The rules and checker live in your repository. No hosted service and no third-party Python dependencies.
 
