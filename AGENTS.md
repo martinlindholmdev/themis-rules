@@ -11,9 +11,11 @@ Layout:
 - `docs/install.md`: the agent's instructions for installing it elsewhere.
 - `docs/frameworks.md`: the 17-agent support matrix.
 - `tools/themis.py`: the vendored checker. Never changed without updating
-  every repository that has it.
-- `install.py` and `install_plan.py`: the commands and the plan building.
-  Run only in this repository, never vendored.
+  every repository that has it. `tools/themis_lang.py`, `tools/themis_scan.py`
+  and `tools/themis_gate.py` (the acceptance gate) are vendored with it.
+- `install.py`, `install_plan.py` and `install_gate.py`: the commands, the plan
+  building, and the two CI workflow templates. Run only in this repository,
+  never vendored.
 - `tests/`: the test suite.
 
 <!-- themis v3.4 begin -->

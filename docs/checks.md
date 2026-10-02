@@ -138,6 +138,100 @@ reported by file and line; the matched text is never printed. The patterns
 are fixed in the checker. This is a pattern match, not a complete secret
 scanner.
 
+## Acceptance gate (rule 13)
+
+Rule 13 says the tests ran and passed. When `themis.json` has a `test` section
+the gate checks it: `python3 tools/themis.py gate` runs the project's own test
+command on the committed tree and fails on an error, no test count, too few
+tests or too many skips. With no `test` section nothing is run and nothing
+fails; `status` says "tests are honour-system". The key is set by
+`install --test-command "python3 -m pytest"` or by hand, never guessed:
+install reads root-level file names to print a suggestion and runs nothing.
+
+```json
+"test": {"command": ["python3", "-m", "unittest"], "runner": "unittest",
+         "min_tests": 12, "max_skipped": 0, "timeout": 1800}
+```
+
+- `command`: an argv list, run without a shell and with no stdin, in the
+  repository root. A program that is not found, a non-zero exit and a timeout
+  each fail. A shell operator in `--test-command` is refused; put pipes and
+  `&&` in a script and name the script.
+- `runner`: `unittest`, `pytest` or `cargo`, which fixes how the output is
+  read (below). `count_pattern` and `skip_pattern` are regular expressions with
+  exactly one group, the number; they are summed over every match in the
+  output (`^` and `$` match at each line) and replace the preset's. A runner without a preset must give `count_pattern`.
+- `min_tests`: the floor on tests that ran, at least 1 and 1 by default. A
+  skipped test did not run, so the count is the reported total less the skips.
+  `max_skipped`: the most skips allowed, 0 by default, enforced only when skips
+  can be read (a preset or a `skip_pattern`); setting it without one is refused.
+  `timeout`: seconds, 1800 by default.
+- `ignore_paths`: path prefixes of tracked files the tests may change, for
+  generated files (below). `floor_reason`: written by `gate --lower`.
+
+Presets, each checked against output captured from the real runner (Python
+3.9.6 unittest, pytest 8.4.2, cargo 1.88.0), fixtures in `tests/fixtures/gate`:
+
+| runner | tests counted | skips counted |
+|---|---|---|
+| `unittest` | `Ran N test(s)` | `skipped=N` in the final line |
+| `pytest` | the passed, failed, skipped, xfailed, xpassed and error items of the summary | the skipped item |
+| `cargo` | each `running N tests` line | each `N ignored` in a `test result` line |
+
+Jest and Vitest have no preset: no output of theirs was captured, so give a
+`count_pattern`. Output is read with stdout and stderr merged, ANSI colour
+codes removed and line breaks normalised. A run whose output holds no count
+fails even when the exit status is 0; it is never read as zero tests passing.
+
+Both ends of a run are tied to a commit. The gate requires the tracked working
+tree and index to equal the tree of the commit it covers, before the run and
+again after it; any difference (a setup step or the test command changed a
+tracked file) fails and names the files, so a pass is never attached to code
+that was not committed. Files the tests must change go in `ignore_paths`.
+Untracked files are not compared. A pass prints one line:
+
+```
+themis: gate PASS commit=<sha> tree=<sha> tests=N skipped=S floor=M cmd=<hash>
+```
+
+Who may move the floor. The command, patterns, `min_tests`, `max_skipped`,
+`timeout` and `ignore_paths` come from the base commit's `themis.json` (A for
+`--range A...B`, HEAD for a plain run), so a change cannot edit its own gate;
+an edit in the same range is ignored and noted as owner only. Raising the
+floor is `gate --record`, which sets `min_tests` to the tests that ran after a
+pass and never lowers it. Lowering it is the owner's own commit on the base
+branch, made before the change that removes tests: `gate --lower N --reason
+"..."` writes the number and the reason into `themis.json` and one line into
+the decision log. There is no override flag and no environment variable.
+
+Where it runs. CI is the authority: `.github/workflows/themis-gate.yml`, a
+separate workflow with a job named `themis-gate`, takes the base commit's own
+copy of the checker (a base older than v3.4 has no gate, and the step is
+skipped) and runs `gate --range`. Install writes that file once, when the owner
+sets a test command and the repository has a GitHub remote, and never rewrites
+it: the owner adds the toolchain and dependency steps the tests need above the
+gate step, and a re-run or an upgrade that would change its template prints the
+difference and leaves the file. The `themis` job stays Themis's own. Give the
+gate job no secrets and no self-hosted runner: it runs the project's tests on
+the proposed code. Whether the job is a required check is a branch-protection
+setting a clone cannot see; `status` says so.
+
+Locally, nothing runs at pre-commit. Once a test command is set, install adds
+`tools/hooks/pre-push` (active when git reads `tools/hooks`; any hook manager
+gets a printed line to add by hand), which runs `gate --reuse` on the
+checked-out commit. A plain `gate` run on a clean tree writes a receipt in
+`.git/themis/gate.json` (tree, command hash, counts) that `--reuse` and `status`
+read when the tree hash still matches. The receipt can be forged by anyone with
+the checkout: it is evidence for a reader and a way to skip a rerun, and CI
+never reads it.
+
+Not covered: edits to the tests themselves, `pytest.ini`, `conftest.py`, skip
+markers, discovery or coverage exclusions and the workflows (only the command,
+patterns and floor are protected, so review those changes), a hostile test
+command, sandboxing, coverage or mutation gates, a check that the branch
+protection names the job, and whether the tests are adequate, which stays with
+the reviewer.
+
 ## Configuration
 
 `check --staged` and `check --range A...B` enforce the `themis.json` already
@@ -156,6 +250,7 @@ after it is committed. Fields:
 - `limits`: `{".ts": {"file": 500, "function": 80}}`; a per-extension limit
   that can only tighten. A value above the hard limit, or not a positive
   integer, is ignored. A baseline entry still allows what it allows.
+- `test`: the acceptance gate's command, runner and floor; see above.
 - `extra_history_words`, `extra_extensions`, `baseline_path` and
   `decision_log`.
 
@@ -179,16 +274,28 @@ Re-running `install` on a current repository does not touch the baseline.
 
 ## The vendored files and `status`
 
-Three standard-library Python files are copied into the repository:
+Four standard-library Python files are copied into the repository:
 `tools/themis.py` (git, configuration, reporting), `tools/themis_lang.py`
-(function length, comments and history matching for the seven languages, and the header reader) and
-`tools/themis_scan.py` (the scanner). They must sit side by side; a missing
-one ends the run with one line. The 800-line limit applies to the checker
-itself, which is why it is three files. The three
-tools files are excluded from every measured set.
+(function length, comments and history matching for the seven languages, and
+the header reader), `tools/themis_scan.py` (the scanner) and
+`tools/themis_gate.py` (the acceptance gate, the git runner and the hook
+lines `status` prints). They must sit side by side; a missing one ends the
+run with one line. The 800-line limit applies to the checker itself, which is
+why it is four files. The four tools files are excluded from every measured
+set.
 
-`status` prints an `enforcement` line: blocking when the hook is on and a CI
-workflow that mentions the checker exists; local hook only (skippable with
-`--no-verify`) when only the hook is on; CI only when only a workflow exists;
-otherwise advisory, nothing runs automatically. A repository with no
-recognised source files fails rather than reporting clean.
+`status` prints facts it can see and nothing it cannot:
+
+- `hook:` whether the pre-commit hook is wired in this clone.
+- `CI:` whether a workflow file runs the checker, and, with a test command
+  set, whether one runs the gate. It always adds that a required check,
+  branch protection and trigger coverage are not verified: no network call is
+  made and a clone cannot see them.
+- `acceptance gate:` "configured" with the command, floor and skip ceiling, or
+  "not configured: tests are honour-system".
+- `last local gate:` "tree matches HEAD, N tests" when the receipt covers the
+  committed tree, else "none or stale".
+- `pre-push:` whether the gate hook is wired in this clone.
+
+A repository with no recognised source files fails rather than reporting
+clean.

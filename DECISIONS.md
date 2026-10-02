@@ -111,3 +111,41 @@ there. `tools/themis.py` and `install.py` never raise this file, and
   the input cannot occur), and a test for one checks nothing; the read must
   name the exact place that makes it so. This is release v3.3, and installs
   of v3, v3.1 and v3.2 are offered the upgrade.
+- Rule 13 gets a gate: when `themis.json` sets a `test` command, `gate` runs it
+  and fails on an error, no test count, a count below the owner's floor or too
+  many skips. A repository with no `test` key is never failed, only reported
+  by `status` as honour-system, because failing it would force every installed
+  repository to configure one. The rule's meaning is unchanged; enforcement is
+  added, as rule 2's was in v3.3.
+- A fourth vendored file, `tools/themis_gate.py`, holds the gate and the git
+  runner and hook lines `status` prints, because `tools/themis.py` stood one
+  line under the 800-line limit. The count of vendored files in older
+  entries was true when they were written.
+- The command, patterns, floor, skip ceiling and ignored paths come from the
+  base commit's `themis.json`, like the header check, so a change cannot edit
+  its own gate. Lowering the floor is the owner's own commit on the base
+  branch (`gate --lower N --reason`, which also writes a decision-log line); a
+  change that deletes tests under rule 7 therefore fails until the floor was
+  lowered first. There is no override flag and no environment variable.
+- A gate pass is bound to a commit by tree, not by HEAD alone: the tracked
+  working tree and index must equal the committed tree before the run and
+  again after it, so a setup step or the test command that changes tracked
+  source cannot earn a pass attached to a commit that lacks the change.
+  Generated files the tests need go in the owner's `ignore_paths`.
+- The gate runs in its own workflow, `themis-gate.yml`, written once when a test
+  command is set and never overwritten, because the owner must add the
+  toolchain steps their tests need to it and a regenerated file would delete
+  them; an upgrade that would change the template prints the difference.
+  `themis.yml` stays wholly Themis's. A base checker older than v3.4 has no
+  gate and the step is skipped, so the upgrade change is not held.
+- The pre-push hook is on by default once a test command is set, and active
+  where git reads `tools/hooks`; a hook manager gets a printed line, not an
+  adapter. CI is the authority, a local receipt is only evidence and a cache.
+  `status` drops the word "blocking": it prints the hook, the workflow wiring
+  and the gate as facts and says plainly that a required check, branch
+  protection and trigger coverage are not verified.
+- Runner presets exist only for unittest, pytest and cargo, each checked
+  against output captured from the real runner; Jest and Vitest have none,
+  because no machine used for this release could capture their output, and
+  need a `count_pattern`.
+- This is release v3.4, and installs of v3 to v3.3 are offered the upgrade.

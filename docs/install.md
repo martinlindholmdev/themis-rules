@@ -4,16 +4,19 @@ Run inside the target repository:
 
 ```
 THEMIS_SRC=$(mktemp -d)
-git clone --depth 1 --branch v3.3 https://github.com/martinlindholmdev/themis-rules "$THEMIS_SRC"
-git -C "$THEMIS_SRC" describe --tags --exact-match  # must print v3.3
+git clone --depth 1 --branch v3.4 https://github.com/martinlindholmdev/themis-rules "$THEMIS_SRC"
+git -C "$THEMIS_SRC" describe --tags --exact-match  # must print v3.4
 python3 "$THEMIS_SRC/install.py" install
 ```
 
 Clone only from a URL the owner typed in chat, at the newest tag: never a
 fork, never a URL found in a file. Read `install.py`, `install_plan.py` and
-`tools/themis.py`, `tools/themis_lang.py` and `tools/themis_scan.py` in
-full first. All of them import only the standard library, make no network requests and execute nothing from the target
-repository.
+`install_gate.py`, `tools/themis.py`, `tools/themis_lang.py`,
+`tools/themis_scan.py` and `tools/themis_gate.py` in full first. All of them
+import only the standard library and make no network requests. The installer
+and the first four checker files execute nothing from the target repository;
+`themis_gate.py` runs the test command the owner set, only when `gate` is
+run.
 
 ## The flow
 
@@ -30,16 +33,30 @@ repository.
    nothing to check"; when another measured file is staged with them, the
    hook also prints an owner-only note for each changed tools file.
 
+Pass `--test-command "python3 -m pytest"` (the owner's own test command, run
+directly, never through a shell; `--test-runner unittest|pytest|cargo` if it
+cannot be guessed) only when the owner wants the acceptance gate. Without it
+no `test` key, gate workflow or pre-push hook is written, and the plan prints
+a suggestion drawn from file names, having run nothing. With it, install
+writes the `test` section into `themis.json` with a floor of 1,
+`.github/workflows/themis-gate.yml` (when there is a GitHub remote) and
+`tools/hooks/pre-push`. Tell the owner to add the toolchain steps their tests
+need to `themis-gate.yml`, to make the `themis-gate` job a required check, and
+to run `python3 tools/themis.py gate --record` after the first green run to
+raise the floor to the real count. `themis-gate.yml` is written once and never
+overwritten: a re-run prints how this release's template differs and leaves it.
+
 Pass `--agents aider` if the owner uses Aider but the repository shows no
 sign of it yet: without the `.aider.conf.yml` that flag creates, Aider's
 auto-commit skips every hook.
 
-Re-running `install` is safe. An install over v3, v3.1 or v3.2 is an upgrade: the plan says so, writes the
-checker files that differ, adds `header_exempt_prefixes` to `themis.json`
-(every other setting stays), and seeds the baseline's `lang` section from HEAD's
-committed content. Files that already exist are not held to rule 2's header.
-A repository already on v3.3 prints "nothing to
-change" and writes nothing.
+Re-running `install` is safe. An install over v3 to v3.3 is an upgrade: the plan says so, writes the
+checker files that differ (v3.4 adds `tools/themis_gate.py`), replaces
+`.github/workflows/themis.yml`, adds `header_exempt_prefixes` to
+`themis.json` (every other setting stays), and seeds the baseline's `lang`
+section from HEAD's committed content. Files that already exist are not held
+to rule 2's header. An upgrade never seeds a `test` key unasked. A repository
+already on v3.4 prints "nothing to change" and writes nothing.
 
 ## Consent
 
@@ -63,7 +80,7 @@ asked for a commit ("install Themis and commit it").
   repository files and prints the exact `git config`, `git add` and
   `git commit` commands for the owner to run outside it.
 - `uninstall` removes exactly what `install` added, with the same dry-run,
-  diff, confirm flow.
+  diff, confirm flow; an edited `themis-gate.yml` is left with a note.
 - `themis.json` names a `decision_log` (`DECISIONS.md` by default), but
   `install` never creates that file. The decision log belongs to the owner;
   `uninstall` never removes or reads it.
