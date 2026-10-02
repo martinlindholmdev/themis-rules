@@ -63,22 +63,40 @@ jobs:
         run: |
           git add -A
           git commit -q -m "install themis"
-          printf 'def mul(a, b):\n    return a * b\n' > util.py
+          python - <<'PY'
+          header = '"""Purpose: multiply.\nEntry points: mul().\nInvariants: none.\nNever change without a decision: nothing.\n"""\n'
+          open("util.py", "w").write(header + "def mul(a, b):\n    return a * b\n")
+          PY
           git add util.py
           git commit -q -m "add util.py"
+      - name: commit a file with no header (must be refused)
+        shell: bash
+        working-directory: ${{ runner.temp }}/scratch
+        run: |
+          printf 'def div(a, b):\n    return a / b\n' > bare.py
+          git add bare.py
+          if out=$(git commit -q -m "add bare.py" 2>&1); then
+            echo "bare.py should have been refused" >&2
+            exit 1
+          fi
+          echo "$out" | grep -q "new file has no valid header" || { echo "refused for the wrong reason: $out" >&2; exit 1; }
+          git reset -q bare.py
+          rm bare.py
       - name: commit an 850-line file (must be refused)
         shell: bash
         working-directory: ${{ runner.temp }}/scratch
         run: |
           python - <<'PY'
+          header = '"""Purpose: a big file.\nEntry points: big().\nInvariants: none.\nNever change without a decision: nothing.\n"""\n'
           lines = ["def big():"] + ["    x = %d" % i for i in range(848)] + ["    return x"]
-          open("oversized.py", "w").write("\n".join(lines) + "\n")
+          open("oversized.py", "w").write(header + "\n".join(lines) + "\n")
           PY
           git add oversized.py
-          if git commit -q -m "add oversized.py"; then
+          if out=$(git commit -q -m "add oversized.py" 2>&1); then
             echo "oversized.py should have been refused" >&2
             exit 1
           fi
+          echo "$out" | grep -q "800-line limit" || { echo "refused for the wrong reason: $out" >&2; exit 1; }
           git reset -q oversized.py
           rm oversized.py
       - name: commit a fake key (must be refused)
@@ -86,13 +104,15 @@ jobs:
         working-directory: ${{ runner.temp }}/scratch
         run: |
           python - <<'PY'
-          open("creds.py", "w").write('API_KEY = "%s%s"\n' % ("sk-", "1234567890abcdef1234"))
+          header = '"""Purpose: a key.\nEntry points: none.\nInvariants: none.\nNever change without a decision: nothing.\n"""\n'
+          open("creds.py", "w").write(header + 'API_KEY = "%s%s"\n' % ("sk-", "1234567890abcdef1234"))
           PY
           git add creds.py
-          if git commit -q -m "add creds.py"; then
+          if out=$(git commit -q -m "add creds.py" 2>&1); then
             echo "creds.py should have been refused" >&2
             exit 1
           fi
+          echo "$out" | grep -q "looks like" || { echo "refused for the wrong reason: $out" >&2; exit 1; }
           git reset -q creds.py
           rm creds.py
       - name: uninstall
