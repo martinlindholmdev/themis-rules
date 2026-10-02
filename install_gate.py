@@ -100,6 +100,7 @@ CI_WORKFLOW = ("""name: themis
 on:
   pull_request:
   push:
+  merge_group:
 permissions:
   contents: read
 jobs:

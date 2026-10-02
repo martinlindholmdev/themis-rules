@@ -222,17 +222,9 @@ falling back to the empty tree. Install writes that file once, when the owner
 sets a test command and the repository has a GitHub remote, and never rewrites
 it: the owner adds the toolchain and dependency steps the tests need above the
 gate step, and a re-run or an upgrade that would change its template prints the
-difference and leaves the file. The `themis` job stays Themis's own and has no
-`merge_group` trigger; an owner whose branch protection requires it in a merge
-queue adds one line under `on:` in `.github/workflows/themis.yml`:
-
-```
-  merge_group:
-```
-
-The shared script already reads the merge-group base and head. Install
-replaces a `themis.yml` that differs from its template, so that line must be
-added again after each upgrade. Give the gate job no secrets and no
+difference and leaves the file. The `themis` job stays Themis's own and runs on `merge_group`
+too, with the same base and head resolution, so both jobs can be required in a
+merge queue. Give the gate job no secrets and no
 self-hosted runner: it runs the project's tests on the proposed code. Whether
 the job is a required check is a branch-protection setting a clone cannot see;
 `status` says so.

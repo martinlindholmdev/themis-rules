@@ -180,8 +180,8 @@ there. `tools/themis.py` and `install.py` never raise this file, and
   `merge_group.base_sha` and HEAD its `merge_group.head_sha`, and an event
   with no base SHA fails the job instead of falling back to the empty tree,
   because a queue entry judged against nothing would pass unchecked. The
-  `themis` workflow gets no `merge_group` trigger; docs/checks.md gives the
-  line an owner adds.
+  `themis` workflow carries the `merge_group` trigger too, because install
+  replaces that file on upgrade and a line an owner added would be lost.
 - The pre-push hook gates only a push whose destination is a protected
   branch, `test.pre_push_branches` (default main and master), read from HEAD
   and from the destination's current commit, so a feature-branch push runs
