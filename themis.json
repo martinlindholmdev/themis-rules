@@ -7,5 +7,18 @@
  "extra_extensions": [],
  "decision_log": "DECISIONS.md",
  "version": "v3.4",
- "header_exempt_prefixes": []
+ "header_exempt_prefixes": [],
+ "test": {
+  "command": [
+   "python3",
+   "-m",
+   "unittest",
+   "discover",
+   "-s",
+   "tests"
+  ],
+  "runner": "unittest",
+  "min_tests": 1,
+  "max_skipped": 0
+ }
 }
