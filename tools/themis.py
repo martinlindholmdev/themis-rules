@@ -42,7 +42,7 @@ import sys
 from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Dict, List, Optional, Tuple
 
-SCRIPT_VERSION = "v3.3"
+SCRIPT_VERSION = "v3.4"
 
 FILE_MAX_LINES = 800
 FUNCTION_MAX_LINES = 100

@@ -16,7 +16,7 @@ Layout:
   Run only in this repository, never vendored.
 - `tests/`: the test suite.
 
-<!-- themis v3.3 begin -->
+<!-- themis v3.4 begin -->
 # Agent rules
 
 Agents write this code; the owner reads results, not code. [check] marks
@@ -62,9 +62,13 @@ Work
 12. Fix the cause. Never get green by swallowing an error, loosening an
     assertion, raising a limit or skipping the hook. A failure you see is
     yours until unchanged main shows it too.
-13. Done means: the check and the tests ran and passed, you show their
-    output, and a different model reviewed the diff for correctness and
-    for changes outside the task. No output shown, not done.
+13. [check] Done means: the check and the tests ran and passed, you show
+    their output, and a different model reviewed the diff for correctness
+    and for changes outside the task. No output shown, not done. Checked
+    only when themis.json sets a test command: CI then runs it on the
+    committed tree and fails on an error, no test count, too few tests or
+    too many skips. The review and whether the tests are adequate are not
+    checked.
 14. [check] No staged secret (a key, token, password) is committed — the
     rest of this rule is not checked. Stage files by name, never `-A`;
     commit each finished step and push; never force-push, skip the hook,
@@ -74,7 +78,7 @@ Work
     never saw this conversation.
 
 Start with `python3 tools/themis.py status`: it lists what is on.
-<!-- themis v3.3 end -->
+<!-- themis v3.4 end -->
 
 ## Standing permissions
 - New libraries without asking: no
