@@ -1,0 +1,8 @@
+============================= test session starts ==============================
+platform darwin -- Python 3.9.6, pytest-8.4.2, pluggy-1.6.0
+rootdir: /work/py
+collected 8 items
+
+test_p.py ..sxX...                                                       [100%]
+
+============== 5 passed, 1 skipped, 1 xfailed, 1 xpassed in 0.02s ==============

@@ -1,0 +1,22 @@
+#!/bin/sh
+# Purpose: run the project's own tests before a push, through the acceptance
+# gate, so a push that would fail the CI gate is stopped on this machine.
+# Entry points: git runs this before every push once hooksPath points here;
+# install writes it only when themis.json sets a test command.
+# Invariants: runs the gate on the checked-out commit and reuses the last
+# local run when it covers that exact tree; a push that only deletes refs
+# runs nothing; exit 0 lets the push through, anything else stops it with
+# the gate's own message.
+# Never change without a decision: which command runs here.
+zero=0000000000000000000000000000000000000000
+push=
+while read -r local_ref local_sha remote_ref remote_sha; do
+    [ "$local_sha" = "$zero" ] || push=1
+done
+[ -n "$push" ] || exit 0
+root=$(git rev-parse --show-toplevel) || exit 1
+py=$(command -v python3 || command -v python) || {
+    echo "themis: needs python 3.9+ on PATH"
+    exit 1
+}
+exec "$py" "$root/tools/themis.py" gate --reuse

@@ -1,0 +1,24 @@
+[1m============================= test session starts ==============================[0m
+platform darwin -- Python 3.9.6, pytest-8.4.2, pluggy-1.6.0
+rootdir: /work/py
+collected 10 items
+
+test_p.py [32m.[0m[32m.[0m[33ms[0m[33mx[0m[33mX[0m[32m.[0m[32m.[0m[32m.[0m[31mF[0m[31mF[0m[31m                                                     [100%][0m
+
+=================================== FAILURES ===================================
+[31m[1m__________________________________ test_fail ___________________________________[0m
+
+>   [0m[94mdef[39;49;00m[90m [39;49;00m[92mtest_fail[39;49;00m(): [94massert[39;49;00m [94m1[39;49;00m == [94m2[39;49;00m[90m[39;49;00m
+[1m[31mE   assert 1 == 2[0m
+
+[1m[31mtest_p.py[0m:12: AssertionError
+[31m[1m__________________________________ test_boom ___________________________________[0m
+
+>   [0m[94mdef[39;49;00m[90m [39;49;00m[92mtest_boom[39;49;00m(): [94mraise[39;49;00m [96mRuntimeError[39;49;00m[90m[39;49;00m
+[1m[31mE   RuntimeError[0m
+
+[1m[31mtest_p.py[0m:13: RuntimeError
+[36m[1m=========================== short test summary info ============================[0m
+[31mFAILED[0m test_p.py::[1mtest_fail[0m - assert 1 == 2
+[31mFAILED[0m test_p.py::[1mtest_boom[0m - RuntimeError
+[31m========= [31m[1m2 failed[0m, [32m5 passed[0m, [33m1 skipped[0m, [33m1 xfailed[0m, [33m1 xpassed[0m[31m in 0.04s[0m[31m =========[0m

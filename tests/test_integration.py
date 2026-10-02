@@ -54,7 +54,7 @@ class RangeCheckTests(unittest.TestCase):
             repo.mkdir()
             init_repo(repo)
             (repo / "tools").mkdir()
-            for name in ("themis.py", "themis_lang.py", "themis_scan.py"):
+            for name in ("themis.py", "themis_lang.py", "themis_scan.py", "themis_gate.py"):
                 (repo / "tools" / name).write_bytes((THEMIS.parent / name).read_bytes())
             (repo / "themis.json").write_text('{"version": "v3"}\n', encoding="utf-8")
             (repo / "main.py").write_text("def add(a, b):\n    return a + b\n", encoding="utf-8")
@@ -79,7 +79,7 @@ class RangeCheckTests(unittest.TestCase):
             repo.mkdir()
             init_repo(repo)
             (repo / "tools").mkdir()
-            for name in ("themis.py", "themis_lang.py", "themis_scan.py"):
+            for name in ("themis.py", "themis_lang.py", "themis_scan.py", "themis_gate.py"):
                 (repo / "tools" / name).write_bytes((THEMIS.parent / name).read_bytes())
             (repo / "themis.json").write_text('{"version": "v3"}\n', encoding="utf-8")
             (repo / "main.py").write_text("def add(a, b):\n    return a + b\n", encoding="utf-8")
@@ -100,7 +100,7 @@ class NonAsciiTests(unittest.TestCase):
             repo.mkdir()
             init_repo(repo)
             (repo / "tools").mkdir()
-            for name in ("themis.py", "themis_lang.py", "themis_scan.py"):
+            for name in ("themis.py", "themis_lang.py", "themis_scan.py", "themis_gate.py"):
                 (repo / "tools" / name).write_bytes((THEMIS.parent / name).read_bytes())
             (repo / "themis.json").write_text('{"version": "v3"}\n', encoding="utf-8")
             (repo / "café.py").write_text("def pour():\n    return 1\n", encoding="utf-8")

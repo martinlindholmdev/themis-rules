@@ -38,7 +38,11 @@ PLAN = _load("install_plan", "install_plan.py")
 AIDER_FILE = PLAN.AIDER_FILE
 ANY_MARKER = PLAN.ANY_MARKER
 CALL_LINE = PLAN.CALL_LINE
+BadTestSetting = PLAN.BadTestSetting
 CI_WORKFLOW = PLAN.CI_WORKFLOW
+GATE_WORKFLOW = PLAN.GATE_WORKFLOW
+GATE_WORKFLOW_REL = PLAN.GATE_WORKFLOW_REL
+PRE_PUSH_REL = PLAN.PRE_PUSH_REL
 Change = PLAN.Change
 LEFTHOOK_BLOCK = PLAN.LEFTHOOK_BLOCK
 POINTER_URL = PLAN.POINTER_URL
@@ -56,6 +60,9 @@ def do_install(root: Path, args: argparse.Namespace) -> int:
     except PLAN.PathEscapesRepo as exc:
         print("themis: refusing to install — themis.json's baseline_path %s; "
               "fix it by hand before installing" % exc)
+        return 1
+    except BadTestSetting as exc:
+        print("themis: refusing to install — %s" % exc)
         return 1
     if not changes:
         for note in notes:
@@ -107,9 +114,10 @@ def plan_remove_core_files(root: Path) -> List[Change]:
         text = read_text(root, rel)
         if text is not None:
             changes.append(Change(rel, text, None))
-    hook = read_text(root, "tools/hooks/pre-commit")
-    if hook is not None and hook == (HERE / "tools" / "hooks" / "pre-commit").read_text(encoding="utf-8"):
-        changes.append(Change("tools/hooks/pre-commit", hook, None))
+    for rel in ("tools/hooks/pre-commit", PRE_PUSH_REL):
+        hook = read_text(root, rel)
+        if hook is not None and hook == (HERE / rel).read_text(encoding="utf-8"):
+            changes.append(Change(rel, hook, None))
     return changes
 
 def _strip_standing_permissions(text: str) -> str:
@@ -162,6 +170,9 @@ def plan_remove_adapters(root: Path) -> List[Change]:
     ci = read_text(root, ".github/workflows/themis.yml")
     if ci == CI_WORKFLOW:
         changes.append(Change(".github/workflows/themis.yml", ci, None))
+    gate_ci = read_text(root, GATE_WORKFLOW_REL)
+    if gate_ci == GATE_WORKFLOW:
+        changes.append(Change(GATE_WORKFLOW_REL, gate_ci, None))
     return changes
 
 def _strip_aider(text: str) -> str:
@@ -236,6 +247,9 @@ def do_uninstall(root: Path, args: argparse.Namespace) -> int:
     changes += plan_remove_adapters(root)
     hook_changes, hook_notes = plan_remove_hook(root)
     changes += hook_changes
+    gate_ci = read_text(root, GATE_WORKFLOW_REL)
+    if gate_ci is not None and gate_ci != GATE_WORKFLOW:
+        hook_notes.append("%s was changed by you, so it is left; remove it by hand" % GATE_WORKFLOW_REL)
     if not changes:
         print("themis: nothing to remove")
         return 0
@@ -365,6 +379,10 @@ def main(argv: Optional[List[str]] = None) -> int:
     install_p.add_argument("--agents", metavar="LIST", default="",
                            help="comma-separated agents in use whose adapters to create, e.g. aider")
     install_p.add_argument("--answers", metavar="PATH", help="a JSON file with answers to the standing questions")
+    install_p.add_argument("--test-command", metavar="CMD", default="",
+                           help="the project's test command, run directly (not by a shell), e.g. \"python3 -m pytest\"")
+    install_p.add_argument("--test-runner", metavar="NAME", default="",
+                           help="how to read its output: unittest, pytest or cargo; guessed from the command if omitted")
     uninstall_p = sub.add_parser("uninstall")
     uninstall_p.add_argument("--dry-run", action="store_true")
     uninstall_p.add_argument("--yes", action="store_true", help="skip the confirmation prompt")

@@ -1,0 +1,18 @@
+..sxX...FF                                                               [100%]
+=================================== FAILURES ===================================
+__________________________________ test_fail ___________________________________
+
+>   def test_fail(): assert 1 == 2
+E   assert 1 == 2
+
+test_p.py:12: AssertionError
+__________________________________ test_boom ___________________________________
+
+>   def test_boom(): raise RuntimeError
+E   RuntimeError
+
+test_p.py:13: RuntimeError
+=========================== short test summary info ============================
+FAILED test_p.py::test_fail - assert 1 == 2
+FAILED test_p.py::test_boom - RuntimeError
+2 failed, 5 passed, 1 skipped, 1 xfailed, 1 xpassed in 0.02s

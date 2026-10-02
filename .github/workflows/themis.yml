@@ -44,13 +44,13 @@ jobs:
           # under the same names, so the base checker finds its own.
           mkdir -p "$RUNNER_TEMP/themis_base"
           if git cat-file -e "$BASE:tools/themis.py" 2>/dev/null; then
-            for f in themis.py themis_lang.py themis_scan.py; do
+            for f in themis.py themis_lang.py themis_scan.py themis_gate.py; do
               if git cat-file -e "$BASE:tools/$f" 2>/dev/null; then
                 git show "$BASE:tools/$f" > "$RUNNER_TEMP/themis_base/$f"
               fi
             done
           else
-            for f in themis.py themis_lang.py themis_scan.py; do
+            for f in themis.py themis_lang.py themis_scan.py themis_gate.py; do
               if [ -f "tools/$f" ]; then cp "tools/$f" "$RUNNER_TEMP/themis_base/$f"; fi
             done
           fi

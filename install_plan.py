@@ -6,7 +6,8 @@ plan_remove_*, machine_table and write_machine_file — never run directly.
 Invariants: same as install.py's — no network access, never executes code
 from the target repo, every write goes through safe_path.
 Never change without a decision: the adapter table, the machine-path
-table, and the marker text (must match tools/themis.py's MARKER).
+table, and the marker text (must match tools/themis.py's MARKER); the
+gate workflow and the pre-push hook are written once and never overwritten.
 """
 
 from __future__ import annotations
@@ -34,7 +35,19 @@ def load_themis():
     spec.loader.exec_module(module)
     return module
 
+def _load_sibling(name: str):
+    spec = importlib.util.spec_from_file_location(name, HERE / (name + ".py"))
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
 THEMIS = load_themis()
+GATE = _load_sibling("install_gate")
+BadTestSetting = GATE.BadTestSetting
+CI_WORKFLOW = GATE.CI_WORKFLOW
+GATE_WORKFLOW = GATE.GATE_WORKFLOW
+GATE_WORKFLOW_REL = ".github/workflows/themis-gate.yml"
+PRE_PUSH_REL = "tools/hooks/pre-push"
 #: matches a themis marker (THEMIS.MARKER) as well as an older agent-rules one,
 #: so an upgrade can find and replace a v1/v2 block, not just a v3 one.
 ANY_MARKER = re.compile(r"<!--\s*(agent-rules|themis)\s+(v\d+(?:\.\d+)*)\s+begin\s*-->")
@@ -104,8 +117,9 @@ class Change:
 #: files whose content is always byte-identical to this kit's own copy;
 #: a new one is proven by hash instead of scrolling ~600 lines of diff
 #: past the owner.
-TOOL_FILES = ("tools/themis.py", "tools/themis_lang.py", "tools/themis_scan.py")
-VENDORED_FILES = TOOL_FILES + ("tools/hooks/pre-commit", ".github/workflows/themis.yml")
+TOOL_FILES = tuple("tools/" + name for name in GATE.TOOL_NAMES)
+VENDORED_FILES = TOOL_FILES + ("tools/hooks/pre-commit", PRE_PUSH_REL, ".github/workflows/themis.yml",
+                               GATE_WORKFLOW_REL)
 
 def _redact_secrets(diff_lines: List[str]) -> List[str]:
     """A diff of a config file an owner already has (.aider.conf.yml, a
@@ -196,7 +210,7 @@ def rules_block() -> str:
     end = rules.index("<!-- themis %s end -->" % THEMIS.SCRIPT_VERSION) + len("<!-- themis %s end -->" % THEMIS.SCRIPT_VERSION)
     return rules[start:end] + "\n"
 
-def plan_core_files(root: Path, notes: Optional[List[str]] = None) -> List[Change]:
+def plan_core_files(root: Path, notes: Optional[List[str]] = None, test: Optional[dict] = None) -> List[Change]:
     changes = []
     notes = [] if notes is None else notes
     for rel in TOOL_FILES:
@@ -230,6 +244,8 @@ def plan_core_files(root: Path, notes: Optional[List[str]] = None) -> List[Chang
     data.setdefault("extra_history_words", [])
     data.setdefault("extra_extensions", [])
     data.setdefault("decision_log", "DECISIONS.md")
+    if test is not None:
+        data["test"] = test
     previous = data.get("version")
     data["version"] = THEMIS.SCRIPT_VERSION
     new_config = json.dumps(data, indent=1, ensure_ascii=False) + "\n"
@@ -586,65 +602,6 @@ def plan_adapters(root: Path, agents: Tuple[str, ...] = ()) -> Tuple[List[Change
 
 # ------------------------------------------------------------- CI backstop
 
-CI_WORKFLOW = """name: themis
-on:
-  pull_request:
-  push:
-permissions:
-  contents: read
-jobs:
-  themis:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
-        with:
-          fetch-depth: 0
-          persist-credentials: false
-      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7.0.0
-        with:
-          python-version: "3.x"
-      - name: themis check
-        run: |
-          if [ "${{ github.event_name }}" = "pull_request" ]; then
-            BASE="${{ github.event.pull_request.base.sha }}"
-          else
-            BASE="${{ github.event.before }}"
-          fi
-          HEAD="${{ github.sha }}"
-          ZERO="0000000000000000000000000000000000000000"
-          EMPTY_TREE="4b825dc642cb6eb9a060e54bf8d69288fbee4904"
-          if [ -z "$BASE" ] || [ "$BASE" = "$ZERO" ]; then
-            # a brand-new branch has nothing to diff against (push) or
-            # this PR itself installs Themis (no base copy yet) — git's
-            # well-known empty-tree hash stands in as BASE, so the range
-            # below still scans every line of the tree for secrets
-            # (nothing "added" is skipped just because there is no
-            # earlier commit) instead of only running a bare whole-tree
-            # size/comment check.
-            BASE="$EMPTY_TREE"
-          fi
-          # run the BASE commit's own copy of the checker, never the one
-          # on this branch — otherwise a change that neuters
-          # tools/themis.py (on a PR, or pushed straight to a branch)
-          # checks itself and passes. check --range also scans every
-          # added line between BASE and HEAD for secrets, on push too.
-          # the checker's sibling files come from BASE too, side by side
-          # under the same names, so the base checker finds its own.
-          mkdir -p "$RUNNER_TEMP/themis_base"
-          if git cat-file -e "$BASE:tools/themis.py" 2>/dev/null; then
-            for f in themis.py themis_lang.py themis_scan.py; do
-              if git cat-file -e "$BASE:tools/$f" 2>/dev/null; then
-                git show "$BASE:tools/$f" > "$RUNNER_TEMP/themis_base/$f"
-              fi
-            done
-          else
-            for f in themis.py themis_lang.py themis_scan.py; do
-              if [ -f "tools/$f" ]; then cp "tools/$f" "$RUNNER_TEMP/themis_base/$f"; fi
-            done
-          fi
-          python3 "$RUNNER_TEMP/themis_base/themis.py" check --range "$BASE...$HEAD"
-"""
-
 def plan_ci_workflow(root: Path) -> List[Change]:
     if not git_remote_is_github(root):
         return []
@@ -653,6 +610,54 @@ def plan_ci_workflow(root: Path) -> List[Change]:
         return []
     return [Change(".github/workflows/themis.yml", current, CI_WORKFLOW)]
 
+def plan_gate_workflow(root: Path, has_test: bool) -> Tuple[List[Change], List[str]]:
+    """themis-gate.yml is written once, when a test command is set and a
+    GitHub remote exists. An existing file is the owner's, with toolchain
+    steps in it: it is never replaced, and a difference from this release's
+    template is only printed."""
+    if not has_test or not git_remote_is_github(root):
+        return [], []
+    current = read_text(root, GATE_WORKFLOW_REL)
+    if current is None:
+        return [Change(GATE_WORKFLOW_REL, None, GATE_WORKFLOW)], []
+    if current == GATE_WORKFLOW:
+        return [], []
+    diff = "".join(_redact_secrets(GATE.workflow_difference(GATE_WORKFLOW_REL, current, GATE_WORKFLOW)
+                                   .splitlines(keepends=True)))
+    return [], ["%s differs from this release's template and was left as it is (your toolchain steps "
+                "live there); the difference:\n%s" % (GATE_WORKFLOW_REL, diff)]
+
+def _hooks_path_is_ours(root: Path, hook_changes: List[Change]) -> bool:
+    if any(c.git_config == ("core.hooksPath", "tools/hooks") for c in hook_changes):
+        return True
+    path, location = THEMIS.hooks_dir(root)
+    return location.startswith("core.hooksPath=") and path.resolve() == (root / "tools" / "hooks").resolve()
+
+def plan_pre_push(root: Path, has_test: bool, hook_changes: List[Change]) -> Tuple[List[Change], List[str]]:
+    """The pre-push hook that runs the gate, written when a test command is
+    set and git is going to read tools/hooks; any other hook setup gets the
+    line to add by hand instead of an adapter."""
+    if not has_test:
+        return [], []
+    if not _hooks_path_is_ours(root, hook_changes):
+        return [], ["pre-push: git does not read tools/hooks here (a hook manager or an existing hook is in "
+                    "charge); add `python3 tools/themis.py gate --reuse` to your pre-push by hand"]
+    source = (HERE / PRE_PUSH_REL).read_text(encoding="utf-8")
+    current = read_text(root, PRE_PUSH_REL)
+    return ([] if current == source else [Change(PRE_PUSH_REL, current, source, executable=True)]), []
+
+def planned_test_section(root: Path, args: argparse.Namespace) -> Optional[dict]:
+    """The "test" section the repository will have after this install: the
+    existing one untouched, or one built from --test-command. None means no
+    gate; the key is never seeded unasked."""
+    text = read_text(root, THEMIS.CONFIG_NAME)
+    existing = (json.loads(text) if text else {}).get("test")
+    command = getattr(args, "test_command", None)
+    if not command:
+        return existing if isinstance(existing, dict) else None
+    return GATE.merged_test(existing, GATE.parse_test_command(command), getattr(args, "test_runner", None),
+                            THEMIS.gate)
+
 # --------------------------------------------------------------- install
 
 def build_install_plan(root: Path, args: argparse.Namespace) -> Tuple[List[Change], List[str]]:
@@ -660,12 +665,16 @@ def build_install_plan(root: Path, args: argparse.Namespace) -> Tuple[List[Chang
     previous = THEMIS.installed_version(root) or THEMIS.load_config(root)["version"]
     if previous and previous != THEMIS.SCRIPT_VERSION:
         notes.append("upgrading Themis %s to %s" % (previous, THEMIS.SCRIPT_VERSION))
-    changes = plan_core_files(root, notes)
+    test = planned_test_section(root, args)
+    changes = plan_core_files(root, notes, test)
     answers = resolve_answers(root, args)
     changes += plan_agents_md(root, answers)
     hook_changes, hook_notes = plan_hook(root)
     changes += hook_changes
     notes += hook_notes
+    push_changes, push_notes = plan_pre_push(root, test is not None, hook_changes)
+    changes += push_changes
+    notes += push_notes
     agents = tuple(a.strip().lower() for a in (getattr(args, "agents", None) or "").split(","))
     adapter_changes, adapter_notes = plan_adapters(root, agents)
     changes += adapter_changes
@@ -673,11 +682,24 @@ def build_install_plan(root: Path, args: argparse.Namespace) -> Tuple[List[Chang
     ci_changes = plan_ci_workflow(root)
     changes += ci_changes
     if any(c.old is not None for c in ci_changes):
-        notes.append("replacing .github/workflows/themis.yml: CI now takes all three checker files from the base commit")
+        notes.append("replacing .github/workflows/themis.yml: CI now takes all four checker files from the base commit")
+    gate_changes, gate_notes = plan_gate_workflow(root, test is not None)
+    changes += gate_changes
+    notes += gate_notes
+    if test is None:
+        notes += _test_command_note(root)
+    elif any(c.rel == THEMIS.CONFIG_NAME for c in changes):
+        notes.append("the test floor starts at 1; after the first green run, `python3 tools/themis.py gate "
+                     "--record` raises it to the number of tests that ran")
     notes.append("gitleaks is the complementary secret scanner: Themis's secret check covers common key shapes only")
     if "aider" not in agents and not aider_in_use(root):
         notes.append("If you use Aider, re-run with --agents aider")
     return changes, notes
+
+def _test_command_note(root: Path) -> List[str]:
+    suggestion = GATE.suggest_command(os.listdir(root))
+    hint = " (from file names only, nothing was run: --test-command \"%s\")" % suggestion if suggestion else ""
+    return ["no test command is set, so tests are honour-system here; set one with install --test-command%s" % hint]
 
 def run_verified_status(root: Path) -> None:
     """Byte-compares the copy against our source, then calls the already

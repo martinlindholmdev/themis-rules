@@ -92,7 +92,7 @@ class CiBackstopTests(unittest.TestCase):
             git(repo, "config", "user.name", "t")
 
             (repo / "tools").mkdir()
-            for name in ("themis.py", "themis_lang.py", "themis_scan.py"):
+            for name in ("themis.py", "themis_lang.py", "themis_scan.py", "themis_gate.py"):
                 (repo / "tools" / name).write_bytes((ROOT / "tools" / name).read_bytes())
             (repo / "themis.json").write_text('{"version": "v3"}\n', encoding="utf-8")
             (repo / "main.py").write_text("def add(a, b):\n    return a + b\n", encoding="utf-8")
@@ -136,7 +136,7 @@ class CiBackstopTests(unittest.TestCase):
             git(repo, "config", "user.email", "t@example.com")
             git(repo, "config", "user.name", "t")
             (repo / "tools").mkdir()
-            for name in ("themis.py", "themis_lang.py", "themis_scan.py"):
+            for name in ("themis.py", "themis_lang.py", "themis_scan.py", "themis_gate.py"):
                 (repo / "tools" / name).write_bytes((ROOT / "tools" / name).read_bytes())
             (repo / "themis.json").write_text('{"version": "v3.3"}\n', encoding="utf-8")
             (repo / "main.ts").write_text("export const a = 1;\n", encoding="utf-8")
@@ -176,7 +176,7 @@ class CiBackstopTests(unittest.TestCase):
             git(repo, "config", "user.email", "t@example.com")
             git(repo, "config", "user.name", "t")
             (repo / "tools").mkdir()
-            for name in ("themis.py", "themis_lang.py", "themis_scan.py"):
+            for name in ("themis.py", "themis_lang.py", "themis_scan.py", "themis_gate.py"):
                 (repo / "tools" / name).write_bytes((ROOT / "tools" / name).read_bytes())
             (repo / "themis.json").write_text('{"version": "v3"}\n', encoding="utf-8")
             (repo / "main.py").write_text("def add(a, b):\n    return a + b\n", encoding="utf-8")
@@ -221,7 +221,7 @@ class CiBackstopTests(unittest.TestCase):
             git(repo, "config", "user.email", "t@example.com")
             git(repo, "config", "user.name", "t")
             (repo / "tools").mkdir()
-            for name in ("themis.py", "themis_lang.py", "themis_scan.py"):
+            for name in ("themis.py", "themis_lang.py", "themis_scan.py", "themis_gate.py"):
                 (repo / "tools" / name).write_bytes((ROOT / "tools" / name).read_bytes())
             (repo / "themis.json").write_text('{"version": "v3"}\n', encoding="utf-8")
             secret = "sk-" + "1234567890abcdef1234"

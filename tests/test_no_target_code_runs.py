@@ -23,7 +23,7 @@ class NoTargetCodeRunsTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             repo = Path(tmp)
             (repo / "tools").mkdir()
-            for name in ("themis.py", "themis_lang.py", "themis_scan.py"):
+            for name in ("themis.py", "themis_lang.py", "themis_scan.py", "themis_gate.py"):
                 (repo / "tools" / name).write_bytes((ROOT / "tools" / name).read_bytes())
             # shadows the stdlib module `tools/themis.py` imports at startup
             (repo / "tools" / "argparse.py").write_text(

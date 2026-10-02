@@ -1,0 +1,21 @@
+..ssxFEs
+======================================================================
+ERROR: test_g (test_b.U)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/work/ut/test_b.py", line 4, in test_g
+    def test_g(self): raise RuntimeError("x")
+RuntimeError: x
+
+======================================================================
+FAIL: test_f (test_b.U)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/work/ut/test_b.py", line 3, in test_f
+    def test_f(self): self.assertEqual(1, 2)
+AssertionError: 1 != 2
+
+----------------------------------------------------------------------
+Ran 8 tests in 0.001s
+
+FAILED (failures=1, errors=1, skipped=3, expected failures=1)

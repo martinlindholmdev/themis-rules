@@ -17,7 +17,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 INSTALL = ROOT / "install.py"
-TOOLS = ("themis.py", "themis_lang.py", "themis_scan.py")
+TOOLS = ("themis.py", "themis_lang.py", "themis_scan.py", "themis_gate.py")
 
 
 def long_ts(name="big", lines=120):

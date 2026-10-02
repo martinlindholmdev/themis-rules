@@ -21,7 +21,7 @@ from headers import SLASH
 
 sys.dont_write_bytecode = True
 ROOT = Path(__file__).resolve().parents[1]
-TOOLS = ("themis.py", "themis_lang.py", "themis_scan.py")
+TOOLS = ("themis.py", "themis_lang.py", "themis_scan.py", "themis_gate.py")
 SECRET = "sk-" + "1234567890abcdef1234"
 
 spec = importlib.util.spec_from_file_location("themis_lang", ROOT / "tools" / "themis_lang.py")

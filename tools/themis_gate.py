@@ -1,0 +1,538 @@
+"""The acceptance gate: runs the project's own test command and judges it.
+
+Purpose: run the command the owner set under "test" in themis.json on the
+exact committed tree, read how many tests ran and were skipped from its
+output, and fail on an error, no count, too few tests or too many skips;
+also holds the git runner and the hook, CI and gate lines `status` prints.
+Entry points: run() for `themis.py gate` (plain, --range A...B, --reuse,
+--record, --lower N --reason TEXT), add_arguments(), parse_test_config(),
+status_lines(), git(), hooks_dir(), hook_status().
+Invariants: standard library only, python3 3.9+, no network access; the
+command is an argv list run without a shell and with no stdin; its
+settings come from the BASE commit's themis.json (A for --range, HEAD
+otherwise), so a change cannot edit its own gate; the tracked working tree
+and index must equal the tree of the commit being gated before the run and
+again after it, except under the owner's ignore_paths; stdout and stderr are
+merged and ANSI codes stripped before the output is read; a missing count is
+a failure, never a zero; a pass names the commit and tree it covers; the
+local receipt in .git is evidence for a reader and a skip-the-rerun cache,
+never read by CI; writes only that receipt, themis.json under --record and
+--lower, and the decision log under --lower.
+Never change without a decision: the themis.json "test" key names and their
+meaning, the runner presets, the PASS line, and the rule that the base
+commit's settings and the committed tree decide.
+"""
+
+from __future__ import annotations
+
+import argparse
+import hashlib
+import json
+import os
+import re
+import shutil
+import subprocess
+from pathlib import Path
+from typing import Callable, List, NamedTuple, Optional, Tuple
+
+SELF_NAME = "themis.py"
+CONFIG_NAME = "themis.json"
+RECEIPT = "themis/gate.json"
+TAIL_LINES = 40
+#: runner -> (count pattern, skip pattern); one group each, summed over all matches
+PRESETS = {
+    "unittest": (r"^Ran (\d+) tests? in ", r"\bskipped=(\d+)"),
+    "pytest": (r"(?:^|, |= )(\d+) (?:passed|failed|skipped|xfailed|xpassed|errors?)\b",
+               r"(?:^|, |= )(\d+) skipped\b"),
+    "cargo": (r"^running (\d+) tests?$", r"\b(\d+) ignored\b"),
+}
+_ANSI = re.compile(r"\x1b\[[0-9;?]*[ -/]*[@-~]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)")
+
+
+def git(root: Path, *args: str) -> str:
+    """Runs git in `root`, quotepath off, output decoded as UTF-8."""
+    cmd = ["git", "-c", "core.quotepath=off", "-C", str(root)] + list(args)
+    return subprocess.run(cmd, check=True, capture_output=True, encoding="utf-8", errors="replace").stdout
+
+
+def _safe(text: str) -> str:
+    """A name from the repo or the test output with control characters made visible."""
+    return "".join(c if ord(c) >= 0x20 and ord(c) != 0x7f else "?" for c in text)
+
+
+# ---------------------------------------------------------------- hooks and CI
+
+def hooks_dir(root: Path) -> Tuple[Path, str]:
+    """core.hooksPath if set, else --git-path hooks (safe under worktrees
+    and submodules, where .git is a file, not a dir)."""
+    try:
+        configured = git(root, "config", "--get", "core.hooksPath").strip()
+    except subprocess.CalledProcessError:
+        configured = ""
+    if configured:
+        path = Path(configured)
+        return (path if path.is_absolute() else root / path), "core.hooksPath=%s" % configured
+    git_path = git(root, "rev-parse", "--git-path", "hooks").strip()
+    return root / git_path, "core.hooksPath not set (default %s)" % git_path
+
+
+def hook_status(root: Path) -> str:
+    """Every place a hook manager can hide its real hook, so a husky- or
+    lefthook-generated .git/hooks/pre-commit is never mistaken for off —
+    but naming themis.py in the manager's own file is not enough: the
+    manager must actually be installed in this clone (its shim present
+    at the git-resolved hooks path), or no commit ever runs it."""
+    managers = (
+        ("husky (.husky/pre-commit)", root / ".husky" / "pre-commit", "npx husky"),
+        ("lefthook (lefthook.yml)", root / "lefthook.yml", "lefthook install"),
+        ("lefthook (lefthook.yaml)", root / "lefthook.yaml", "lefthook install"),
+        ("pre-commit framework (.pre-commit-config.yaml)", root / ".pre-commit-config.yaml", "pre-commit install"),
+    )
+    hooks_path, location = hooks_dir(root)
+    hook_path = hooks_path / "pre-commit"
+    installed = hook_path.is_file()
+    for label, path, install_cmd in managers:
+        if not path.exists():
+            continue
+        text = path.read_text(encoding="utf-8", errors="replace")
+        if SELF_NAME not in text:
+            return "%s found but does not call %s — off" % (label, SELF_NAME)
+        if not installed:
+            return "%s calls %s, but it is not installed in this clone (run `%s`) — off" % (label, SELF_NAME, install_cmd)
+        return "%s — on" % label
+    if not installed:
+        return "%s; no pre-commit file there — the hook will not run" % location
+    text = hook_path.read_text(encoding="utf-8", errors="replace")
+    if SELF_NAME in text:
+        return "%s; pre-commit calls %s — on" % (location, SELF_NAME)
+    return "%s; a pre-commit file is there but does not call %s — off, foreign hook kept" % (location, SELF_NAME)
+
+
+def _workflow_texts(root: Path) -> List[str]:
+    workflows = root / ".github" / "workflows"
+    if not workflows.is_dir():
+        return []
+    return [p.read_text(encoding="utf-8", errors="replace")
+            for p in sorted(workflows.iterdir()) if p.suffix in (".yml", ".yaml") and p.is_file()]
+
+
+def ci_line(root: Path, configured: bool) -> str:
+    """What the workflow files show; whether the job is a required check, and
+    whether its triggers cover every branch, is not something a clone can see."""
+    texts = _workflow_texts(root)
+    if not any(SELF_NAME in t for t in texts):
+        return "CI: no workflow runs %s" % SELF_NAME
+    line = "CI: workflow wiring detected (a workflow runs %s" % SELF_NAME
+    if configured and not any(re.search(r"%s\"?\s+gate\b" % re.escape(SELF_NAME), t) for t in texts):
+        return line + ", but none runs the gate: tests are not checked on the server)"
+    return line + "); a required check, branch protection and trigger coverage are not verified"
+
+
+# --------------------------------------------------------------- configuration
+
+class GateConfig(NamedTuple):
+    command: List[str]
+    count: "re.Pattern[str]"
+    skip: Optional["re.Pattern[str]"]
+    min_tests: int
+    max_skipped: int
+    timeout: int
+    ignore: List[str]
+
+
+def _pattern(value: object, name: str, problems: List[str]) -> Optional["re.Pattern[str]"]:
+    if not isinstance(value, str) or not value or len(value) > 500:
+        problems.append("test.%s must be a regular expression of at most 500 characters" % name)
+        return None
+    try:
+        compiled = re.compile(value, re.MULTILINE)
+    except re.error as exc:
+        problems.append("test.%s does not compile (%s)" % (name, exc))
+        return None
+    if compiled.groups != 1:
+        problems.append("test.%s must have exactly one group, the number" % name)
+        return None
+    return compiled
+
+
+def _whole(raw: dict, key: str, default: int, low: int, high: int, problems: List[str]) -> int:
+    value = raw.get(key, default)
+    if isinstance(value, bool) or not isinstance(value, int) or not low <= value <= high:
+        problems.append("test.%s must be a whole number from %d to %d" % (key, low, high))
+        return default
+    return value
+
+
+def parse_test_config(raw: object) -> Tuple[Optional[GateConfig], List[str]]:
+    """(config, problems) for a themis.json "test" value. None with no
+    problems means no gate is configured; a configured gate that cannot be
+    understood is a problem, never silently the same as none."""
+    if raw is None:
+        return None, []
+    if not isinstance(raw, dict):
+        return None, ["test must be an object"]
+    problems: List[str] = []
+    command = raw.get("command")
+    if (not isinstance(command, list) or not command
+            or not all(isinstance(a, str) and a and "\0" not in a for a in command)):
+        problems.append("test.command must be a non-empty list of strings (an argv, never a shell string)")
+    runner = raw.get("runner")
+    if runner is not None and runner not in PRESETS:
+        problems.append("test.runner must be one of %s" % ", ".join(sorted(PRESETS)))
+        runner = None
+    preset = PRESETS.get(runner, (None, None))
+    count = _pattern(raw["count_pattern"], "count_pattern", problems) if "count_pattern" in raw else None
+    skip = _pattern(raw["skip_pattern"], "skip_pattern", problems) if "skip_pattern" in raw else None
+    if count is None and not any("count_pattern" in p for p in problems):
+        if preset[0] is None:
+            problems.append("test needs a runner (%s) or a count_pattern" % ", ".join(sorted(PRESETS)))
+        else:
+            count = re.compile(preset[0], re.MULTILINE)
+    if skip is None and preset[1] is not None and "skip_pattern" not in raw:
+        skip = re.compile(preset[1], re.MULTILINE)
+    if skip is None and "max_skipped" in raw:
+        problems.append("test.max_skipped needs a skip_pattern or a runner preset to read skips from")
+    ignore = raw.get("ignore_paths", [])
+    if not isinstance(ignore, list) or not all(isinstance(p, str) and p for p in ignore):
+        problems.append("test.ignore_paths must be a list of non-empty path prefixes")
+        ignore = []
+    floor = _whole(raw, "min_tests", 1, 1, 10 ** 9, problems)
+    ceiling = _whole(raw, "max_skipped", 0, 0, 10 ** 9, problems)
+    timeout = _whole(raw, "timeout", 1800, 1, 86400, problems)
+    if problems or count is None:
+        return None, problems
+    return GateConfig(list(command), count, skip, floor, ceiling, timeout, list(ignore)), []
+
+
+def raw_test_at(root: Path, rev: str) -> Tuple[object, Optional[str]]:
+    """(the "test" value, None) from themis.json committed at `rev`, or
+    (None, why) when there is no readable themis.json there."""
+    try:
+        text = git(root, "show", "%s:%s" % (rev, CONFIG_NAME))
+    except subprocess.CalledProcessError:
+        return None, "no %s at %s" % (CONFIG_NAME, rev)
+    try:
+        data = json.loads(text)
+    except json.JSONDecodeError:
+        return None, "%s at %s is not valid JSON" % (CONFIG_NAME, rev)
+    return (data.get("test") if isinstance(data, dict) else None), None
+
+
+# ------------------------------------------------------------------- judging
+
+def clean_output(text: str) -> str:
+    """Line breaks normalised and ANSI colour codes removed, so a runner that
+    colours its summary still matches the patterns."""
+    return _ANSI.sub("", text.replace("\r\n", "\n").replace("\r", "\n"))
+
+
+def _sum(pattern: "re.Pattern[str]", text: str) -> Optional[int]:
+    found = [int(m.group(1)) for m in pattern.finditer(text)]
+    return sum(found) if found else None
+
+
+def judge(cfg: GateConfig, output: str, status: Optional[int],
+          timed_out: bool) -> Tuple[Optional[int], Optional[int], List[str]]:
+    """(tests that ran, skipped or None when not measured, problems). A
+    skip is not a test that ran. No count in the output is a problem even
+    when the exit status was zero."""
+    if timed_out:
+        return None, None, ["the test command timed out after %d seconds" % cfg.timeout]
+    problems: List[str] = []
+    if status != 0:
+        problems.append("the test command exited with status %s" % status)
+    try:
+        total = _sum(cfg.count, output)
+        skipped = None if cfg.skip is None else (_sum(cfg.skip, output) or 0)
+    except ValueError:
+        return None, None, problems + ["a test pattern matched text that is not a number"]
+    if total is None:
+        return None, skipped, problems + ["no test count found in the output; a run that reports "
+                                           "no count is never read as a pass"]
+    ran = total - (skipped or 0)
+    if ran < 0:
+        return None, skipped, problems + ["the output reports more skips (%d) than tests (%d)" % (skipped, total)]
+    if ran < max(1, cfg.min_tests):
+        problems.append("%d test(s) ran, below the floor of %d" % (ran, max(1, cfg.min_tests)))
+    if skipped is not None and skipped > cfg.max_skipped:
+        problems.append("%d test(s) skipped, above the ceiling of %d" % (skipped, cfg.max_skipped))
+    return ran, skipped, problems
+
+
+def command_hash(command: List[str]) -> str:
+    return hashlib.sha256(json.dumps(command).encode("utf-8")).hexdigest()[:12]
+
+
+class Ran(NamedTuple):
+    output: str
+    status: Optional[int]
+    timed_out: bool
+    error: Optional[str]
+
+
+def run_command(root: Path, cfg: GateConfig) -> Ran:
+    first = cfg.command[0]
+    exe = str(root / first) if ("/" in first or os.sep in first) else shutil.which(first)
+    if exe is None:
+        return Ran("", None, False, "command not found: %s" % _safe(first))
+    argv = [exe] + cfg.command[1:]
+    try:
+        done = subprocess.run(argv, cwd=str(root), stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                              stderr=subprocess.STDOUT, timeout=cfg.timeout)
+    except subprocess.TimeoutExpired as exc:
+        partial = exc.output.decode("utf-8", errors="replace") if isinstance(exc.output, bytes) else ""
+        return Ran(clean_output(partial), None, True, None)
+    except OSError as exc:
+        return Ran("", None, False, "cannot run %s (%s)" % (_safe(first), exc.strerror or "error"))
+    return Ran(clean_output(done.stdout.decode("utf-8", errors="replace")), done.returncode, False, None)
+
+
+# ------------------------------------------------------------ the committed tree
+
+def tree_problems(root: Path, rev: str, ignore: List[str]) -> List[str]:
+    """Tracked paths whose index or working-tree content differs from the
+    tree of `rev`, less the owner's ignore_paths. The tests read the working
+    tree, so a result is only about `rev` when none differ."""
+    differing = set()
+    for extra in ((), ("--cached",)):
+        out = git(root, "diff", "--name-only", "--no-renames", "-z", *extra, rev)
+        differing.update(p for p in out.split("\0") if p)
+    left = sorted(p for p in differing if not any(p.startswith(i) for i in ignore))
+    if not left:
+        return []
+    names = ", ".join(_safe(p) for p in left[:5]) + (" and %d more" % (len(left) - 5) if len(left) > 5 else "")
+    return ["tracked files differ from the committed tree of %s: %s; the gate covers only what is committed, "
+            "so commit or restore them (generated files the tests need go in test.ignore_paths)" % (rev[:12], names)]
+
+
+def _rev(root: Path, name: str) -> Optional[str]:
+    try:
+        return git(root, "rev-parse", "--verify", "--quiet", name).strip() or None
+    except subprocess.CalledProcessError:
+        return None
+
+
+# -------------------------------------------------------------------- receipt
+
+def receipt_path(root: Path) -> Path:
+    return root / git(root, "rev-parse", "--git-path", RECEIPT).strip()
+
+
+def read_receipt(root: Path) -> Optional[dict]:
+    try:
+        data = json.loads(receipt_path(root).read_text(encoding="utf-8"))
+    except (OSError, ValueError, subprocess.CalledProcessError):
+        return None
+    return data if isinstance(data, dict) else None
+
+
+def write_receipt(root: Path, data: dict) -> None:
+    try:
+        path = receipt_path(root)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(data, indent=1) + "\n", encoding="utf-8")
+    except (OSError, subprocess.CalledProcessError):
+        print("note: the local receipt could not be written; the gate will rerun next time")
+
+
+def _matching_receipt(root: Path, cfg: GateConfig) -> Optional[dict]:
+    tree = _rev(root, "HEAD^{tree}")
+    receipt = read_receipt(root)
+    if receipt and tree and receipt.get("tree") == tree and receipt.get("command") == command_hash(cfg.command):
+        return receipt
+    return None
+
+
+# ------------------------------------------------------------------ the gate
+
+def _fail(problems: List[str], output: str = "") -> int:
+    print("themis: gate FAIL, %d problem(s)" % len(problems))
+    for problem in problems:
+        print("  " + problem)
+    lines = output.strip().splitlines()[-TAIL_LINES:]
+    if lines:
+        print("--- last %d line(s) of the test output ---" % len(lines))
+        print("\n".join(lines))
+    return 1
+
+
+def _pass_line(commit: str, tree: str, cfg: GateConfig, ran: int, skipped: Optional[int], note: str = "") -> str:
+    return "themis: gate PASS commit=%s tree=%s tests=%d skipped=%s floor=%d cmd=%s%s" % (
+        commit, tree, ran, "n/a" if skipped is None else skipped, max(1, cfg.min_tests),
+        command_hash(cfg.command), note)
+
+
+def _load(root: Path, cfg_rev: str) -> Tuple[Optional[GateConfig], int]:
+    """(config, -1) to go on, or (None, exit status) when the gate ends here."""
+    raw, why = raw_test_at(root, cfg_rev)
+    if why is not None:
+        print("themis: gate skipped, %s: tests are honour-system here" % why)
+        return None, 0
+    cfg, problems = parse_test_config(raw)
+    if problems:
+        return None, _fail(["themis.json at %s: %s" % (cfg_rev[:12], p) for p in problems])
+    if cfg is None:
+        print("themis: gate skipped, no test command in %s at %s: tests are honour-system here"
+              % (CONFIG_NAME, cfg_rev[:12]))
+        return None, 0
+    return cfg, -1
+
+
+def execute(root: Path, cfg_rev: str, target: str, local: bool, reuse: bool) -> Tuple[int, Optional[GateConfig], int]:
+    """Gates `target` under the settings committed at `cfg_rev`. Returns
+    (exit status, config, tests that ran)."""
+    cfg, ended = _load(root, cfg_rev)
+    if cfg is None:
+        return ended, None, 0
+    commit, head = _rev(root, target + "^{commit}"), _rev(root, "HEAD")
+    if commit is None or commit != head:
+        return _fail(["the checked-out commit is not %s; the gate runs only on the commit it names" % target]), cfg, 0
+    tree = _rev(root, commit + "^{tree}") or ""
+    before = tree_problems(root, commit, cfg.ignore)
+    if before:
+        return _fail(before), cfg, 0
+    receipt = _matching_receipt(root, cfg) if reuse else None
+    if receipt:
+        print(_pass_line(commit, tree, cfg, receipt.get("tests", 0), receipt.get("skipped"),
+                         " (reused: the local run on this exact tree)"))
+        return 0, cfg, int(receipt.get("tests", 0))
+    result = run_command(root, cfg)
+    if result.error:
+        return _fail([result.error]), cfg, 0
+    ran, skipped, problems = judge(cfg, result.output, result.status, result.timed_out)
+    problems += tree_problems(root, commit, cfg.ignore)
+    if problems or ran is None:
+        return _fail(problems or ["no result"], result.output), cfg, 0
+    print(_pass_line(commit, tree, cfg, ran, skipped))
+    if local:
+        write_receipt(root, {"commit": commit, "tree": tree, "command": command_hash(cfg.command),
+                             "tests": ran, "skipped": skipped})
+    return 0, cfg, ran
+
+
+# ------------------------------------------------- owner-only changes to the floor
+
+def _update_test_section(root: Path, safe_path: Callable[[Path, str], Path],
+                         change: Callable[[dict, dict], Optional[str]]) -> int:
+    """Rewrites the working-tree themis.json through `change(whole, test)`,
+    which returns an error text or None."""
+    try:
+        path = safe_path(root, CONFIG_NAME)
+        whole = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        print("themis: cannot read %s (%s)" % (CONFIG_NAME, exc.__class__.__name__))
+        return 1
+    test = whole.get("test") if isinstance(whole, dict) else None
+    if not isinstance(test, dict):
+        print("themis: %s has no test section to change" % CONFIG_NAME)
+        return 1
+    before = json.dumps(whole)
+    error = change(whole, test)
+    if error:
+        print("themis: " + error)
+        return 1
+    if json.dumps(whole) == before:
+        return 0
+    path.write_text(json.dumps(whole, indent=1, ensure_ascii=False) + "\n", encoding="utf-8")
+    return 0
+
+
+def record_floor(root: Path, safe_path: Callable[[Path, str], Path], observed: int) -> int:
+    def change(whole: dict, test: dict) -> Optional[str]:
+        current = test.get("min_tests", 1)
+        if not isinstance(current, int) or isinstance(current, bool) or observed <= current:
+            print("themis: floor stays at %s (this run had %d)" % (current, observed))
+            return None
+        test["min_tests"] = observed
+        print("themis: floor raised from %d to %d in %s; commit it" % (current, observed, CONFIG_NAME))
+        return None
+    return _update_test_section(root, safe_path, change)
+
+
+def lower_floor(root: Path, safe_path: Callable[[Path, str], Path], target: int, reason: Optional[str]) -> int:
+    reason = (reason or "").strip()
+    if not reason or "\n" in reason or "\r" in reason or len(reason) > 300:
+        print("themis: --lower needs --reason with one line of at most 300 characters")
+        return 2
+
+    def change(whole: dict, test: dict) -> Optional[str]:
+        current = test.get("min_tests", 1)
+        log = whole.get("decision_log")
+        if not isinstance(current, int) or isinstance(current, bool) or not 1 <= target < current:
+            return "the floor is %s; --lower needs a whole number from 1 to %s" % (current, current - 1)
+        if not isinstance(log, str) or not re.fullmatch(r"[\w./-]+", log):
+            return "set decision_log in %s to a file name first; the lowering is written there" % CONFIG_NAME
+        try:
+            log_path = safe_path(root, log)
+            old = log_path.read_text(encoding="utf-8") if log_path.exists() else ""
+            line = "- The test floor was lowered from %d to %d: %s\n" % (current, target, reason)
+            log_path.write_text(old + ("" if not old or old.endswith("\n") else "\n") + line, encoding="utf-8")
+        except (OSError, ValueError) as exc:
+            return "cannot write the decision log (%s)" % exc.__class__.__name__
+        test["min_tests"] = target
+        test["floor_reason"] = reason
+        print("themis: floor lowered from %d to %d; %s and %s changed. Commit them on the base branch "
+              "by themselves, before the change that removes tests." % (current, target, CONFIG_NAME, log))
+        return None
+    return _update_test_section(root, safe_path, change)
+
+
+# ------------------------------------------------------- command line, status
+
+def add_arguments(parser: argparse.ArgumentParser) -> None:
+    group = parser.add_mutually_exclusive_group()
+    group.add_argument("--range", metavar="A...B", help="CI: gate commit B under the settings committed at A")
+    group.add_argument("--reuse", action="store_true", help="skip the run when the last local run covers this tree")
+    group.add_argument("--record", action="store_true", help="after a pass, raise min_tests to the tests that ran")
+    group.add_argument("--lower", type=int, metavar="N", help="owner only: lower min_tests to N")
+    parser.add_argument("--reason", help="with --lower: why, in one line; written to the decision log")
+
+
+def run(root: Path, args: argparse.Namespace, safe_path: Callable[[Path, str], Path]) -> int:
+    if args.lower is not None:
+        return lower_floor(root, safe_path, args.lower, args.reason)
+    if args.reason is not None:
+        print("themis: --reason goes with --lower")
+        return 2
+    cfg_rev, target = "HEAD", "HEAD"
+    if args.range:
+        if "..." not in args.range:
+            print("themis: --range needs the form A...B (e.g. origin/main...HEAD)")
+            return 2
+        cfg_rev, target = args.range.split("...", 1)
+        base, _ = raw_test_at(root, cfg_rev)
+        head, _ = raw_test_at(root, target)
+        if base != head:
+            print("note: the test settings changed between %s and %s; owner only, the settings at %s are used"
+                  % (cfg_rev[:12], target[:12], cfg_rev[:12]))
+    status, cfg, ran = execute(root, cfg_rev, target, not args.range, args.reuse)
+    if status == 0 and cfg is not None and args.record:
+        return record_floor(root, safe_path, ran)
+    return status
+
+
+def _pre_push_line(root: Path) -> str:
+    hooks_path, _ = hooks_dir(root)
+    hook = hooks_path / "pre-push"
+    if hook.is_file() and re.search(r"%s\"?\s+gate\b" % re.escape(SELF_NAME),
+                                    hook.read_text(encoding="utf-8", errors="replace")):
+        return "pre-push: runs the gate before a push"
+    return "pre-push: not wired in this clone; the gate runs in CI only"
+
+
+def status_lines(root: Path, raw_test: object) -> List[str]:
+    """The CI, acceptance gate and local-gate lines for `status`, from this
+    clone's themis.json; nothing here asks a server anything."""
+    cfg, problems = parse_test_config(raw_test)
+    lines = [ci_line(root, cfg is not None)]
+    if problems:
+        return lines + ["acceptance gate: configured but not valid (%s)" % "; ".join(problems)]
+    if cfg is None:
+        return lines + ["acceptance gate: not configured: tests are honour-system"]
+    lines.append("acceptance gate: configured (command %s, floor %d, max skipped %s)" % (
+        " ".join(_safe(a) for a in cfg.command), max(1, cfg.min_tests), cfg.max_skipped if cfg.skip else "not measured"))
+    receipt = _matching_receipt(root, cfg)
+    lines.append("last local gate: tree matches HEAD, %s tests" % receipt.get("tests") if receipt
+                 else "last local gate: none or stale")
+    lines.append(_pre_push_line(root))
+    return lines

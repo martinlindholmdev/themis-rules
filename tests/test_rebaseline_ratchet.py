@@ -39,7 +39,7 @@ class RebaselineOnlyLowersTests(unittest.TestCase):
         git(self.root, "config", "user.email", "t@example.com")
         git(self.root, "config", "user.name", "t")
         (self.root / "tools").mkdir()
-        for name in ("themis.py", "themis_lang.py", "themis_scan.py"):
+        for name in ("themis.py", "themis_lang.py", "themis_scan.py", "themis_gate.py"):
             (self.root / "tools" / name).write_bytes((THEMIS.parent / name).read_bytes())
         (self.root / "themis.json").write_text('{"version": "v3"}\n', encoding="utf-8")
         (self.root / "main.py").write_text(big(900), encoding="utf-8")

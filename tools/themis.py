@@ -10,11 +10,12 @@ checks staged files, the staged diff and a baseline that only shrinks
 commit B and scans the two-dot diff A..B for secrets, against the config
 and baseline at A (what the CI backstop runs); `status` reports what is
 wired up; `rebaseline` lowers the baseline to today's sizes and refuses,
-writing nothing, if that would raise a number or add an entry.
+writing nothing, if that would raise a number or add an entry; `gate` runs
+the project's own tests as an acceptance gate (see themis_gate.py).
 Invariants: standard library only, python3 3.9+, no network access;
 writes nothing except the baseline file, and only under `rebaseline`;
 every repo-specific value comes from `themis.json`, read fresh each run;
-"0 files measured" fails loudly; this script and its two siblings are never
+"0 files measured" fails loudly; this script and its three siblings are never
 counted; a size or function limit may shrink, never grow; a matched
 secret is never printed, only its file, line and shape; git always runs
 with quotepath off, so non-ASCII filenames are measured; `--staged`
@@ -24,9 +25,9 @@ in the same commit does nothing; `--range` does the same against A; the
 header check reads only files added relative to that base, under its
 config, and is skipped with a note when the base has no themis.json.
 Never change without a decision: the two hard limits, the marker text,
-the themis.json field names, and the secret pattern list — the three tools
-files are vendored byte-for-byte; themis_lang.py and themis_scan.py must sit
-beside this file or the run ends at once with one line.
+the themis.json field names, and the secret pattern list — the four tools
+files are vendored byte-for-byte; themis_lang.py, themis_scan.py and
+themis_gate.py must sit beside this file or the run ends at once with one line.
 """
 
 from __future__ import annotations
@@ -50,8 +51,7 @@ CONFIG_NAME = "themis.json"
 MARKER = re.compile(r"<!--\s*themis\s+(v\d+(?:\.\d+)*)\s+begin\s*-->")
 
 #: the vendored tools files; excluded from every measured set.
-SELF_PATHS = ("tools/themis.py", "tools/themis_lang.py", "tools/themis_scan.py")
-SELF_NAME = "themis.py"
+SELF_PATHS = ("tools/themis.py", "tools/themis_lang.py", "tools/themis_scan.py", "tools/themis_gate.py")
 
 
 def _load_sibling(name: str):
@@ -69,10 +69,14 @@ def _load_sibling(name: str):
 
 try:
     lang = _load_sibling("themis_lang")
+    gate = _load_sibling("themis_gate")
 except ImportError as exc:
     print("themis: cannot run: %s" % exc)
     sys.exit(1)
 history_hits = lang.history_hits
+hooks_dir = gate.hooks_dir
+hook_status = gate.hook_status
+_git = gate.git
 
 #: extension -> (line-comment prefix, block-comment (start, end), "python" if measurable)
 _HASH = ("#", None, None)
@@ -120,10 +124,6 @@ def git_root() -> Path:
     cmd = ["git", "rev-parse", "--show-toplevel"]
     out = subprocess.run(cmd, check=True, capture_output=True, encoding="utf-8", errors="replace").stdout
     return Path(out.strip())
-
-def _git(root: Path, *args: str) -> str:
-    cmd = ["git", "-c", "core.quotepath=off", "-C", str(root)] + list(args)
-    return subprocess.run(cmd, check=True, capture_output=True, encoding="utf-8", errors="replace").stdout
 
 def _with_defaults(data: dict) -> dict:
     data.setdefault("version", None)
@@ -582,61 +582,6 @@ def installed_version(root: Path) -> Optional[str]:
                 return match.group(1)
     return None
 
-def hooks_dir(root: Path) -> Tuple[Path, str]:
-    """core.hooksPath if set, else --git-path hooks (safe under worktrees
-    and submodules, where .git is a file, not a dir)."""
-    try:
-        configured = _git(root, "config", "--get", "core.hooksPath").strip()
-    except subprocess.CalledProcessError:
-        configured = ""
-    if configured:
-        path = Path(configured)
-        return (path if path.is_absolute() else root / path), "core.hooksPath=%s" % configured
-    git_path = _git(root, "rev-parse", "--git-path", "hooks").strip()
-    return root / git_path, "core.hooksPath not set (default %s)" % git_path
-
-def hook_status(root: Path) -> str:
-    """Every place a hook manager can hide its real hook, so a husky- or
-    lefthook-generated .git/hooks/pre-commit is never mistaken for off —
-    but naming themis.py in the manager's own file is not enough: the
-    manager must actually be installed in this clone (its shim present
-    at the git-resolved hooks path), or no commit ever runs it."""
-    managers = (
-        ("husky (.husky/pre-commit)", root / ".husky" / "pre-commit", "npx husky"),
-        ("lefthook (lefthook.yml)", root / "lefthook.yml", "lefthook install"),
-        ("lefthook (lefthook.yaml)", root / "lefthook.yaml", "lefthook install"),
-        ("pre-commit framework (.pre-commit-config.yaml)", root / ".pre-commit-config.yaml", "pre-commit install"),
-    )
-    hooks_path, location = hooks_dir(root)
-    hook_path = hooks_path / "pre-commit"
-    installed = hook_path.is_file()
-    for label, path, install_cmd in managers:
-        if not path.exists():
-            continue
-        text = path.read_text(encoding="utf-8", errors="replace")
-        if SELF_NAME not in text:
-            return "%s found but does not call %s — off" % (label, SELF_NAME)
-        if not installed:
-            return "%s calls %s, but it is not installed in this clone (run `%s`) — off" % (label, SELF_NAME, install_cmd)
-        return "%s — on" % label
-    if not installed:
-        return "%s; no pre-commit file there — the hook will not run" % location
-    text = hook_path.read_text(encoding="utf-8", errors="replace")
-    if SELF_NAME in text:
-        return "%s; pre-commit calls %s — on" % (location, SELF_NAME)
-    return "%s; a pre-commit file is there but does not call %s — off, foreign hook kept" % (location, SELF_NAME)
-
-def enforcement_level(root: Path, hook_on: bool) -> str:
-    workflows = root / ".github" / "workflows"
-    in_ci = workflows.is_dir() and any(
-        SELF_NAME in p.read_text(encoding="utf-8", errors="replace")
-        for p in sorted(workflows.iterdir()) if p.suffix in (".yml", ".yaml") and p.is_file())
-    if hook_on and in_ci:
-        return "blocking (the hook and a CI workflow both run it)"
-    if hook_on:
-        return "local hook only (skippable with --no-verify)"
-    return "CI only (commits are not checked locally)" if in_ci else "advisory: nothing runs automatically"
-
 def print_status(root: Path, config: dict) -> int:
     paths = tree_files(root, config)
     baseline = load_baseline(root, config)
@@ -650,9 +595,9 @@ def print_status(root: Path, config: dict) -> int:
     if config["version"] and config["version"] != SCRIPT_VERSION:
         print("  versions differ: themis.json says %s, this script is %s — re-run the install"
               % (config["version"], SCRIPT_VERSION))
-    hook = hook_status(root)
-    print("  hook: %s" % hook)
-    print("  enforcement: %s" % enforcement_level(root, hook.endswith("— on")))
+    print("  hook: %s" % hook_status(root))
+    for line in gate.status_lines(root, config.get("test")):
+        print("  " + line)
     print("  python: %d.%d" % (sys.version_info[0], sys.version_info[1]))
     print("  files measured: %d" % len(paths))
     print("  extensions not function-measured: %s" % (", ".join(unmeasured) if unmeasured else "none seen"))
@@ -760,11 +705,14 @@ def main(argv: Optional[List[str]] = None) -> int:
     group.add_argument("--range", metavar="A...B", help="check the tree at B; scan the two-dot diff A..B for secrets")
     sub.add_parser("status", help="report what is installed and wired up")
     sub.add_parser("rebaseline", help="lower the baseline to today's sizes; never raises a number")
+    gate.add_arguments(sub.add_parser("gate", help="run the project's tests and enforce the acceptance floor"))
     args = parser.parse_args(argv)
     root = git_root()
     config = load_config(root)
     if args.command == "status":
         return print_status(root, config)
+    if args.command == "gate":
+        return gate.run(root, args, safe_rel_path)
     if args.command == "rebaseline":
         print("themis: rebaseline only lowers the baseline: it drops entries for files that shrank "
               "under a limit or were deleted, and refuses to raise any number.")

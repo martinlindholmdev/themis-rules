@@ -22,7 +22,7 @@ from headers import HASH, PY, SLASH
 
 sys.dont_write_bytecode = True
 ROOT = Path(__file__).resolve().parents[1]
-TOOLS = ("themis.py", "themis_lang.py", "themis_scan.py")
+TOOLS = ("themis.py", "themis_lang.py", "themis_scan.py", "themis_gate.py")
 INSTALL = ROOT / "install.py"
 FIELDS = ["Purpose: guard the door.", "Entry points: open().", "Invariants: none.",
           "Never change without a decision: the name."]
