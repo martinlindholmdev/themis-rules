@@ -58,6 +58,14 @@ section from HEAD's committed content. Files that already exist are not held
 to rule 2's header. An upgrade never seeds a `test` key unasked. A repository
 already on v3.4 prints "nothing to change" and writes nothing.
 
+Install never replaces a `tools/hooks/pre-push` that differs from the current
+template, so an owner whose hook is the older template (it runs the gate on the
+checked-out commit whatever ref is pushed) does not get the new one by
+re-running `install`. To refresh it, and only if the owner added no checks of
+their own to it, delete `tools/hooks/pre-push` and run `install` again, or copy
+`tools/hooks/pre-push` from this repository over it. The new hook refuses a
+push whose commit has a different tree from the checked-out one.
+
 ## Consent
 
 An owner's plain request ("install Themis", "install it with the defaults")

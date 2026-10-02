@@ -227,7 +227,10 @@ Locally, nothing runs at pre-commit. Once a test command is set, install adds
 `tools/hooks/pre-push` when none exists (active when git reads `tools/hooks`;
 an existing one that differs is yours and is never replaced, and any hook
 manager gets a printed line to add by hand), which runs `gate --reuse` on the
-checked-out commit. A plain `gate` run on a clean tree writes a receipt in
+checked-out commit. For each ref being pushed (a deletion is skipped) the hook
+first compares the pushed commit's tree with the checked-out commit's; if any
+differs it refuses the push, before any test runs, with one line naming the
+ref and saying to check it out and push from there. A plain `gate` run on a clean tree writes a receipt in
 `.git/themis/gate.json` (tree, command hash, counts) that `--reuse` and `status`
 read when the tree hash still matches. The receipt can be forged by anyone with
 the checkout: it is evidence for a reader and a way to skip a rerun, and CI

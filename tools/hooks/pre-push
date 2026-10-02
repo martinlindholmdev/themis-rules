@@ -4,16 +4,29 @@
 # Entry points: git runs this before every push once hooksPath points here;
 # install writes it only when themis.json sets a test command.
 # Invariants: runs the gate on the checked-out commit and reuses the last
-# local run when it covers that exact tree; a push that only deletes refs
-# runs nothing; exit 0 lets the push through, anything else stops it with
-# the gate's own message.
+# local run when it covers that exact tree; every pushed commit must have
+# that same tree, else the push is refused before any test runs, naming the
+# ref to check out and push from; a push that only deletes refs runs
+# nothing; exit 0 lets the push through, anything else stops it with the
+# message of this hook or of the gate.
 # Never change without a decision: which command runs here.
 zero=0000000000000000000000000000000000000000
 push=
+other=
+head_tree=$(git rev-parse "HEAD^{tree}" 2>/dev/null)
 while read -r local_ref local_sha remote_ref remote_sha; do
-    [ "$local_sha" = "$zero" ] || push=1
+    [ "$local_sha" = "$zero" ] && continue
+    push=1
+    tree=$(git rev-parse "$local_sha^{tree}" 2>/dev/null)
+    if [ -z "$other" ] && { [ -z "$tree" ] || [ "$tree" != "$head_tree" ]; }; then
+        other=$local_ref
+    fi
 done
 [ -n "$push" ] || exit 0
+if [ -n "$other" ]; then
+    echo "themis: $other is not the checked-out commit, so the gate has not tested it; check it out and push from there" >&2
+    exit 1
+fi
 root=$(git rev-parse --show-toplevel) || exit 1
 py=$(command -v python3 || command -v python) || {
     echo "themis: needs python 3.9+ on PATH"

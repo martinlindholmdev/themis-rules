@@ -118,5 +118,45 @@ class PrePushHook(GateCiCase):
         self.assertEqual(self.push("0" * 40).returncode, 0)
 
 
+class PrePushRealPush(GateCiCase):
+    def git_push(self, *args):
+        return subprocess.run(["git", "-C", str(self.repo), "push", "-q", "origin"] + list(args),
+                              capture_output=True, text=True)
+
+    def setUp(self):
+        super().setUp()
+        self.base_commit()
+        hook = self.repo / "tools" / "hooks" / "pre-push"
+        hook.parent.mkdir(parents=True)
+        hook.write_bytes((ROOT / "tools" / "hooks" / "pre-push").read_bytes())
+        hook.chmod(0o755)
+        self.commit("hook")
+        sh(self.repo, "config", "core.hooksPath", "tools/hooks")
+        subprocess.run(["git", "init", "-q", "--bare", str(self.tmp / "remote.git")], check=True)
+        sh(self.repo, "remote", "add", "origin", str(self.tmp / "remote.git"))
+        self.green = sh(self.repo, "branch", "--show-current")
+        sh(self.repo, "checkout", "-q", "-b", "other")
+        (self.repo / "other.txt").write_text("a different tree\n", encoding="utf-8")
+        self.commit("other tree")
+        sh(self.repo, "checkout", "-q", self.green)
+
+    def test_only_a_commit_whose_tree_the_gate_tested_is_published(self):
+        refused = self.git_push("other")
+        self.assertNotEqual(refused.returncode, 0)
+        self.assertIn("refs/heads/other", refused.stderr)
+        self.assertNotIn("gate PASS", refused.stdout + refused.stderr)
+        both = self.git_push(self.green, "other")
+        self.assertNotEqual(both.returncode, 0)
+        allowed = self.git_push("HEAD:refs/heads/" + self.green)
+        self.assertEqual(allowed.returncode, 0, allowed.stdout + allowed.stderr)
+        self.assertIn("gate PASS", allowed.stdout + allowed.stderr)
+
+    def test_a_delete_only_push_runs_no_gate(self):
+        self.assertEqual(self.git_push("HEAD:refs/heads/doomed").returncode, 0)
+        deleted = self.git_push("--delete", "doomed")
+        self.assertEqual(deleted.returncode, 0, deleted.stdout + deleted.stderr)
+        self.assertNotIn("gate", deleted.stdout + deleted.stderr)
+
+
 if __name__ == "__main__":
     unittest.main()

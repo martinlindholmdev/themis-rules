@@ -161,3 +161,8 @@ there. `tools/themis.py` and `install.py` never raise this file, and
   181 tests the first green run counted, so its own status no longer reports
   honour-system tests. The gate workflow is the unmodified template, because
   the suite needs only the Python standard library.
+- The pre-push hook refuses, before any test runs, a push of any commit whose
+  tree differs from the checked-out commit's, because the gate tests only the
+  checked-out tree and `git push origin other` would otherwise publish an
+  untested commit; install still never replaces an edited hook, so an owner
+  with the older template refreshes it by hand (docs/install.md).
