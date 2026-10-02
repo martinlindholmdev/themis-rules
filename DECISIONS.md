@@ -94,3 +94,9 @@ there. `tools/themis.py` and `install.py` never raise this file, and
   test, debug and improve Themis and to add features, releasing after a
   review by a model from a different family. Changing what a rule means
   still needs the owner's word.
+- Direction, from the owner: Themis aims at agent-written software that is
+  token-efficient to build, safe, and trustworthy enough to deploy without
+  an engineer reading every line, for any coding agent. It evolves one
+  release at a time from real use and from periodic research into what
+  frontier labs and other harnesses do; each new check is validated against
+  that research before it is built.
