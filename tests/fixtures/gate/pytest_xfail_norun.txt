@@ -1,0 +1,8 @@
+============================= test session starts ==============================
+platform darwin -- Python 3.9.6, pytest-8.4.2, pluggy-1.6.0
+rootdir: /work/xf
+collected 1 item
+
+test_x.py x                                                              [100%]
+
+============================== 1 xfailed in 0.05s ==============================

@@ -155,7 +155,9 @@ install reads root-level file names to print a suggestion and runs nothing.
 
 - `command`: an argv list, run without a shell and with no stdin, in the
   repository root. A program that is not found, a non-zero exit and a timeout
-  each fail. A shell operator in `--test-command` is refused; put pipes and
+  each fail. On a timeout the command's whole process group is killed (on
+  Windows `taskkill /T`, not exercised by the tests); a process that starts its
+  own session is not reached. A shell operator in `--test-command` is refused; put pipes and
   `&&` in a script and name the script.
 - `runner`: `unittest`, `pytest` or `cargo`, which fixes how the output is
   read (below). `count_pattern` and `skip_pattern` are regular expressions with
@@ -175,8 +177,13 @@ Presets, each checked against output captured from the real runner (Python
 | runner | tests counted | skips counted |
 |---|---|---|
 | `unittest` | `Ran N test(s)` | `skipped=N` in the final line |
-| `pytest` | the passed, failed, skipped, xfailed, xpassed and error items of the summary | the skipped item |
+| `pytest` | the passed, failed, skipped, xfailed, xpassed and error items of the summary | the skipped and xfailed items |
 | `cargo` | each `running N tests` line | each `N ignored` in a `test result` line |
+
+pytest's xfailed counts as skipped, so it is held to `max_skipped`:
+`xfail(run=False)` reports xfailed without running the test body and the
+summary cannot tell it from an xfail that ran. unittest's expected failures
+and cargo's `should_panic` tests do run their bodies and are counted as run.
 
 Jest and Vitest have no preset: no output of theirs was captured, so give a
 `count_pattern`. Output is read with stdout and stderr merged, ANSI colour
@@ -217,8 +224,9 @@ the proposed code. Whether the job is a required check is a branch-protection
 setting a clone cannot see; `status` says so.
 
 Locally, nothing runs at pre-commit. Once a test command is set, install adds
-`tools/hooks/pre-push` (active when git reads `tools/hooks`; any hook manager
-gets a printed line to add by hand), which runs `gate --reuse` on the
+`tools/hooks/pre-push` when none exists (active when git reads `tools/hooks`;
+an existing one that differs is yours and is never replaced, and any hook
+manager gets a printed line to add by hand), which runs `gate --reuse` on the
 checked-out commit. A plain `gate` run on a clean tree writes a receipt in
 `.git/themis/gate.json` (tree, command hash, counts) that `--reuse` and `status`
 read when the tree hash still matches. The receipt can be forged by anyone with

@@ -116,6 +116,19 @@ class OwnerSetupSurvives(GateInstallCase):
         self.assertIn("left as it is", done.stdout)
         self.assertIn("+" + CUSTOM_STEP.rstrip("\n"), done.stdout)
 
+    def test_a_reinstall_never_replaces_an_owner_edited_pre_push_hook(self):
+        repo, _ = self.customized_repo()
+        hook = repo / "tools/hooks/pre-push"
+        edited = hook.read_text(encoding="utf-8") + "echo owner-check\n"
+        hook.write_text(edited, encoding="utf-8")
+        done = self.install(repo, "--test-command", "python3 -m unittest")
+        self.assertEqual(done.returncode, 0, done.stdout + done.stderr)
+        self.assertEqual(hook.read_text(encoding="utf-8"), edited)
+        self.assertIn("left as it is", done.stdout)
+        hook.unlink()
+        self.install(repo)
+        self.assertIn("gate --reuse", hook.read_text(encoding="utf-8"))
+
     def test_an_upgrade_from_the_previous_release_leaves_them_too(self):
         repo, custom = self.customized_repo()
         config = self.config(repo)

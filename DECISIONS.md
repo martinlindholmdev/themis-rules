@@ -149,3 +149,10 @@ there. `tools/themis.py` and `install.py` never raise this file, and
   because no machine used for this release could capture their output, and
   need a `count_pattern`.
 - This is release v3.4, and installs of v3 to v3.3 are offered the upgrade.
+- The pre-push hook is created when absent and never replaced once it differs
+  (the owner may have added checks to it); a timeout kills the test command's
+  whole process group, since a descendant left running could keep editing the
+  checkout; and pytest's xfailed counts as skipped, because `xfail(run=False)`
+  reports xfailed without running the body and nothing in the summary
+  distinguishes it. unittest's expected failures and cargo's `should_panic`
+  tests run their bodies, so they still count as run.

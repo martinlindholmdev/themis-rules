@@ -17,6 +17,7 @@ import re
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
 
@@ -138,6 +139,18 @@ class RunTests(GateCase):
         gone = self.gate(self.repo(dict(UNITTEST, command=["no-such-program-themis"])))
         self.assertEqual(gone.returncode, 1)
         self.assertIn("command not found: no-such-program-themis", gone.stdout)
+
+    @unittest.skipIf(sys.platform == "win32", "the process-group kill is POSIX; Windows uses taskkill /T")
+    def test_a_timeout_ends_the_processes_the_command_started_too(self):
+        script = ("import subprocess, sys, time\n"
+                  "subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(3); open(\"late.txt\", \"w\").write(\"x\")'])\n"
+                  "time.sleep(60)\n")
+        repo = self.repo(dict(UNITTEST, timeout=1, command=[sys.executable, "run_tests.py"]))
+        self.write(repo, "run_tests.py", script)
+        self.commit(repo, "wrapper")
+        self.assertIn("timed out", self.gate(repo).stdout)
+        time.sleep(4)
+        self.assertFalse((repo / "late.txt").exists())
 
     def test_colour_codes_in_the_summary_do_not_hide_the_count(self):
         command = fake("\x1b[32mRan \x1b[1m4\x1b[0m tests in 0.0s\x1b[0m\n\nOK")
@@ -282,18 +295,20 @@ class StatusWording(GateCase):
 class Presets(unittest.TestCase):
     """Each preset reads output captured from the real runner: python 3.9.6's
     unittest, pytest 8.4.2 and cargo 1.88.0; only the working directory was
-    rewritten to /work."""
+    rewritten to /work. pytest's xfailed counts as skipped, since
+    xfail(run=False) reports it without running the body; unittest's expected
+    failures and cargo's should_panic tests do run their bodies."""
 
     CASES = (
         ("unittest", "unittest_pass_skip.txt", 5, 2),
         ("unittest", "unittest_fail.txt", 8, 3),
         ("unittest", "unittest_one.txt", 1, 0),
         ("unittest", "unittest_zero.txt", 0, 0),
-        ("pytest", "pytest_pass.txt", 8, 1),
-        ("pytest", "pytest_q_pass_rs.txt", 8, 1),
-        ("pytest", "pytest_fail.txt", 10, 1),
-        ("pytest", "pytest_q_fail.txt", 10, 1),
-        ("pytest", "pytest_color_fail.txt", 10, 1),
+        ("pytest", "pytest_pass.txt", 8, 2),
+        ("pytest", "pytest_q_pass_rs.txt", 8, 2),
+        ("pytest", "pytest_fail.txt", 10, 2),
+        ("pytest", "pytest_q_fail.txt", 10, 2),
+        ("pytest", "pytest_color_fail.txt", 10, 2),
         ("cargo", "cargo_pass.txt", 5, 2),
         ("cargo", "cargo_fail.txt", 4, 1),
     )
@@ -306,6 +321,13 @@ class Presets(unittest.TestCase):
                 text = gate.clean_output((FIXTURES / name).read_text(encoding="utf-8"))
                 ran, skips, found = gate.judge(cfg, text, 0, False)
                 self.assertEqual((ran, skips), (total - skipped, skipped), found)
+
+    def test_a_pytest_suite_whose_only_test_is_xfail_without_running_it_fails_the_floor(self):
+        cfg, _ = gate.parse_test_config({"command": ["x"], "runner": "pytest"})
+        text = gate.clean_output((FIXTURES / "pytest_xfail_norun.txt").read_text(encoding="utf-8"))
+        ran, skipped, problems = gate.judge(cfg, text, 0, False)
+        self.assertEqual((ran, skipped), (0, 1))
+        self.assertIn("0 test(s) ran, below the floor of 1", problems)
 
     def test_pytest_output_with_no_summary_count_is_no_count(self):
         cfg, _ = gate.parse_test_config({"command": ["x"], "runner": "pytest"})

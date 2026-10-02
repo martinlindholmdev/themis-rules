@@ -634,9 +634,10 @@ def _hooks_path_is_ours(root: Path, hook_changes: List[Change]) -> bool:
     return location.startswith("core.hooksPath=") and path.resolve() == (root / "tools" / "hooks").resolve()
 
 def plan_pre_push(root: Path, has_test: bool, hook_changes: List[Change]) -> Tuple[List[Change], List[str]]:
-    """The pre-push hook that runs the gate, written when a test command is
-    set and git is going to read tools/hooks; any other hook setup gets the
-    line to add by hand instead of an adapter."""
+    """The pre-push hook that runs the gate, created when a test command is
+    set, git is going to read tools/hooks and no such file exists; an existing
+    one that differs is the owner's and is never replaced. Any other hook
+    setup gets the line to add by hand instead of an adapter."""
     if not has_test:
         return [], []
     if not _hooks_path_is_ours(root, hook_changes):
@@ -644,7 +645,12 @@ def plan_pre_push(root: Path, has_test: bool, hook_changes: List[Change]) -> Tup
                     "charge); add `python3 tools/themis.py gate --reuse` to your pre-push by hand"]
     source = (HERE / PRE_PUSH_REL).read_text(encoding="utf-8")
     current = read_text(root, PRE_PUSH_REL)
-    return ([] if current == source else [Change(PRE_PUSH_REL, current, source, executable=True)]), []
+    if current is None:
+        return [Change(PRE_PUSH_REL, None, source, executable=True)], []
+    if current == source:
+        return [], []
+    return [], ["%s exists and differs from this release's hook, so it is left as it is (your own checks "
+                "may be in it); make sure it runs `python3 tools/themis.py gate --reuse`" % PRE_PUSH_REL]
 
 def planned_test_section(root: Path, args: argparse.Namespace) -> Optional[dict]:
     """The "test" section the repository will have after this install: the

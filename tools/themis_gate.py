@@ -31,6 +31,7 @@ import json
 import os
 import re
 import shutil
+import signal
 import subprocess
 from pathlib import Path
 from typing import Callable, List, NamedTuple, Optional, Tuple
@@ -39,11 +40,13 @@ SELF_NAME = "themis.py"
 CONFIG_NAME = "themis.json"
 RECEIPT = "themis/gate.json"
 TAIL_LINES = 40
-#: runner -> (count pattern, skip pattern); one group each, summed over all matches
+#: runner -> (count pattern, skip pattern); one group each, summed over all matches.
+#: pytest's xfailed counts as skipped: `xfail(run=False)` reports xfailed
+#: without running the body and the summary cannot tell the two apart.
 PRESETS = {
     "unittest": (r"^Ran (\d+) tests? in ", r"\bskipped=(\d+)"),
     "pytest": (r"(?:^|, |= )(\d+) (?:passed|failed|skipped|xfailed|xpassed|errors?)\b",
-               r"(?:^|, |= )(\d+) skipped\b"),
+               r"(?:^|, |= )(\d+) (?:skipped|xfailed)\b"),
     "cargo": (r"^running (\d+) tests?$", r"\b(\d+) ignored\b"),
 }
 _ANSI = re.compile(r"\x1b\[[0-9;?]*[ -/]*[@-~]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)")
@@ -270,21 +273,42 @@ class Ran(NamedTuple):
     error: Optional[str]
 
 
+def _stop_tree(proc: "subprocess.Popen[bytes]") -> None:
+    """Ends the command and everything it started: the whole process group on
+    POSIX (the command runs in its own session), `taskkill /T` on Windows. A
+    descendant that leaves the group on purpose is not reached."""
+    if os.name == "nt":
+        subprocess.run(["taskkill", "/T", "/F", "/PID", str(proc.pid)], capture_output=True)
+        proc.kill()
+        return
+    try:
+        os.killpg(proc.pid, signal.SIGKILL)
+    except OSError:
+        proc.kill()
+
+
 def run_command(root: Path, cfg: GateConfig) -> Ran:
     first = cfg.command[0]
     exe = str(root / first) if ("/" in first or os.sep in first) else shutil.which(first)
     if exe is None:
         return Ran("", None, False, "command not found: %s" % _safe(first))
     argv = [exe] + cfg.command[1:]
+    group = {"start_new_session": True} if os.name != "nt" else {}
     try:
-        done = subprocess.run(argv, cwd=str(root), stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
-                              stderr=subprocess.STDOUT, timeout=cfg.timeout)
-    except subprocess.TimeoutExpired as exc:
-        partial = exc.output.decode("utf-8", errors="replace") if isinstance(exc.output, bytes) else ""
-        return Ran(clean_output(partial), None, True, None)
+        proc = subprocess.Popen(argv, cwd=str(root), stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                                stderr=subprocess.STDOUT, **group)
     except OSError as exc:
         return Ran("", None, False, "cannot run %s (%s)" % (_safe(first), exc.strerror or "error"))
-    return Ran(clean_output(done.stdout.decode("utf-8", errors="replace")), done.returncode, False, None)
+    try:
+        out, _ = proc.communicate(timeout=cfg.timeout)
+    except subprocess.TimeoutExpired:
+        _stop_tree(proc)
+        try:
+            out, _ = proc.communicate(timeout=10)
+        except subprocess.TimeoutExpired:
+            out = b""
+        return Ran(clean_output(out.decode("utf-8", errors="replace")), None, True, None)
+    return Ran(clean_output(out.decode("utf-8", errors="replace")), proc.returncode, False, None)
 
 
 # ------------------------------------------------------------ the committed tree
