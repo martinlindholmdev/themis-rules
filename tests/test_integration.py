@@ -164,7 +164,7 @@ class InstallLifecycleTests(unittest.TestCase):
 
 
 class UpgradeTests(unittest.TestCase):
-    def test_upgrade_from_agent_rules_v2_lands_on_v3_1_and_is_then_idempotent(self):
+    def test_upgrade_from_agent_rules_v2_lands_on_v3_2_and_is_then_idempotent(self):
         with tempfile.TemporaryDirectory() as tmp:
             repo = Path(tmp) / "repo"
             (repo / "tools").mkdir(parents=True)
@@ -187,9 +187,9 @@ class UpgradeTests(unittest.TestCase):
             self.assertFalse((repo / "agent-rules.json").exists())
             self.assertTrue((repo / "themis.json").exists())
             agents = (repo / "AGENTS.md").read_text(encoding="utf-8")
-            self.assertIn("<!-- themis v3.1 begin -->", agents)
+            self.assertIn("<!-- themis v3.2 begin -->", agents)
             self.assertNotIn("agent-rules v2", agents)
-            commit_all(repo, "upgrade to themis v3.1")
+            commit_all(repo, "upgrade to themis v3.2")
 
             again = run(repo, str(INSTALL), "install", "--defaults", "--yes")
             self.assertIn("nothing to change", again.stdout)

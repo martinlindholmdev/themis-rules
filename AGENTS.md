@@ -16,7 +16,7 @@ Layout:
   Run only in this repository, never vendored.
 - `tests/`: the test suite.
 
-<!-- themis v3.1 begin -->
+<!-- themis v3.2 begin -->
 # Agent rules
 
 Agents write this code; the owner reads results, not code. [check] marks
@@ -40,7 +40,10 @@ Shape
    code; never silence the warning about it.
 7. Fewer tests, not more: one per behaviour the owner would notice
    breaking. A test that pins today's exact output is deleted, not
-   updated. Before bulk deletion, plant small bugs; keep what catches them.
+   updated. Before bulk deletion, plant small bugs; keep what catches
+   them, and delete only what a read shows is a true duplicate:
+   catching the same bug is not proof. A planted bug nothing catches
+   is a missing test.
 8. Past 25 source files, one code map under 40 lines, held to the tree by
    a test. Shrink one module at a time; run the tests between batches.
 9. A scheduled or long-running job ends with one log line giving its duration.
@@ -67,7 +70,7 @@ Work
     never saw this conversation.
 
 Start with `python3 tools/themis.py status`: it lists what is on.
-<!-- themis v3.1 end -->
+<!-- themis v3.2 end -->
 
 ## Standing permissions
 - New libraries without asking: no

@@ -40,7 +40,7 @@ class Repo:
         self.git("config", "user.name", "t")
         for name in tools:
             (self.path / "tools" / name).write_bytes((ROOT / "tools" / name).read_bytes())
-        self.write("themis.json", json.dumps(dict(config or {}, version="v3.1")))
+        self.write("themis.json", json.dumps(dict(config or {}, version="v3.2")))
         self.write("main.py", "x = 1\n")
 
     def git(self, *args):

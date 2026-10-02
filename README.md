@@ -36,14 +36,14 @@ Requires git and Python 3.9 or later. From inside the target repository:
 
 ```
 THEMIS_SRC=$(mktemp -d)
-git clone --depth 1 --branch v3.1 https://github.com/martinlindholmdev/themis-rules "$THEMIS_SRC"
-git -C "$THEMIS_SRC" describe --tags --exact-match  # must print v3.1
+git clone --depth 1 --branch v3.2 https://github.com/martinlindholmdev/themis-rules "$THEMIS_SRC"
+git -C "$THEMIS_SRC" describe --tags --exact-match  # must print v3.2
 python3 "$THEMIS_SRC/install.py" install
 ```
 
 The installer prints the plan and writes nothing until you confirm. It makes no network requests, executes nothing from the target repository and never runs `git commit`.
 
-Or tell your agent: "Install Themis from github.com/martinlindholmdev/themis-rules at tag v3.1." The agent's instructions are in [docs/install.md](docs/install.md).
+Or tell your agent: "Install Themis from github.com/martinlindholmdev/themis-rules at tag v3.2." The agent's instructions are in [docs/install.md](docs/install.md).
 
 When the local hook is enabled, it checks staged changes before a commit. The checker is committed with the repository; activate the local hook in each fresh clone with `git config core.hooksPath tools/hooks`. A repository wired through husky, lefthook or the pre-commit framework uses that tool's own install step instead.
 

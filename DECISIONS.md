@@ -82,3 +82,11 @@ there. `tools/themis.py` and `install.py` never raise this file, and
   is also keyed `<unmeasured>#n` and refused like a long function.
 - C and C++ are not measured for function length yet; their macro-shaped
   headers and preprocessor branches need a separate reader.
+- Rule 7 now says to delete only what a read shows is a true duplicate,
+  because catching the same planted bug is not proof of one, and that a
+  planted bug nothing catches is a missing test. Measured on a real
+  project: 37 tests offered as duplicates for catching the same planted bug
+  as another test each checked something the other did not, and the planted
+  bugs no test caught found 11 missing tests across two packages. No other
+  rule changed; this is release v3.2, and installs of v3 and v3.1 are
+  offered the upgrade.
