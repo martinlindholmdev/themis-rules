@@ -1,4 +1,4 @@
-<p align="center"><img src="assets/themis-tile.svg" alt="Themis mark: a meander" width="96"></p>
+<p align="center"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/themis-icon-dark.svg"><img src="assets/themis-icon-light.svg" alt="Themis mark: a 3D meander" width="96"></picture></p>
 <h1 align="center">Themis</h1>
 <p align="center">
 <a href="https://github.com/martinlindholmdev/themis-rules/actions/workflows/ci.yml"><img src="https://github.com/martinlindholmdev/themis-rules/actions/workflows/ci.yml/badge.svg" alt="CI status"></a>
