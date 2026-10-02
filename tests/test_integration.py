@@ -16,6 +16,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from headers import PY
+
 ROOT = Path(__file__).resolve().parents[1]
 INSTALL = ROOT / "install.py"
 THEMIS = ROOT / "tools" / "themis.py"
@@ -138,19 +140,20 @@ class InstallLifecycleTests(unittest.TestCase):
             self.assertEqual(second.returncode, 0)
             self.assertIn("nothing to change", second.stdout)
 
-            (repo / "util.py").write_text("def mul(a, b):\n    return a * b\n", encoding="utf-8")
+            (repo / "util.py").write_text(PY + "def mul(a, b):\n    return a * b\n", encoding="utf-8")
             subprocess.run(["git", "-C", str(repo), "add", "util.py"], check=True)
             good = subprocess.run(["git", "-C", str(repo), "commit", "-q", "-m", "add util.py"],
                                    cwd=str(repo), capture_output=True, text=True)
             self.assertEqual(good.returncode, 0, good.stdout + good.stderr)
 
             big = "\n".join(["def big():"] + ["    x = %d" % i for i in range(900)] + ["    return x"])
-            (repo / "oversized.py").write_text(big + "\n", encoding="utf-8")
+            (repo / "oversized.py").write_text(PY + big + "\n", encoding="utf-8")
             subprocess.run(["git", "-C", str(repo), "add", "oversized.py"], check=True)
             bad = subprocess.run(["git", "-C", str(repo), "commit", "-q", "-m", "add oversized.py"],
                                   cwd=str(repo), capture_output=True, text=True)
             self.assertNotEqual(bad.returncode, 0)
             self.assertIn("over the 800-line limit", bad.stdout + bad.stderr)
+            self.assertNotIn("valid header", bad.stdout + bad.stderr)
 
     def test_uninstall_restores_the_tree(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -164,7 +167,7 @@ class InstallLifecycleTests(unittest.TestCase):
 
 
 class UpgradeTests(unittest.TestCase):
-    def test_upgrade_from_agent_rules_v2_lands_on_v3_2_and_is_then_idempotent(self):
+    def test_upgrade_from_agent_rules_v2_lands_on_v3_3_and_is_then_idempotent(self):
         with tempfile.TemporaryDirectory() as tmp:
             repo = Path(tmp) / "repo"
             (repo / "tools").mkdir(parents=True)
@@ -187,9 +190,9 @@ class UpgradeTests(unittest.TestCase):
             self.assertFalse((repo / "agent-rules.json").exists())
             self.assertTrue((repo / "themis.json").exists())
             agents = (repo / "AGENTS.md").read_text(encoding="utf-8")
-            self.assertIn("<!-- themis v3.2 begin -->", agents)
+            self.assertIn("<!-- themis v3.3 begin -->", agents)
             self.assertNotIn("agent-rules v2", agents)
-            commit_all(repo, "upgrade to themis v3.2")
+            commit_all(repo, "upgrade to themis v3.3")
 
             again = run(repo, str(INSTALL), "install", "--defaults", "--yes")
             self.assertIn("nothing to change", again.stdout)

@@ -5,8 +5,9 @@ every comment and literal (keeping newlines), and collect the comments with
 their line numbers, for themis_lang.py to measure and match.
 Entry points: Scan(text, lang) with lang one of rust, go, swift, kotlin,
 java, csharp, js; its code, comments, notes, broken and line_at();
-legacy_comments(), a plain scanner for other languages, and
-python_comments(), which reads Python through the tokenizer.
+legacy_comments(), a plain scanner for other languages,
+python_comments(), which reads Python through the tokenizer, and
+leading_blocks(), the comment blocks that open a file.
 Invariants: standard library only, python3 3.9+; pure over the text, no file
 access, no printing, no module-level mutable state; code has the same
 length and line breaks as the text, and a literal leaves one quote mark; an
@@ -16,7 +17,8 @@ repeated (a kind that reaches the end of the file is dropped, a regex
 that fails ends regex attempts for its line), a backslash never escapes
 past the end of a single-line string, so every character is walked a
 bounded number of times; a RecursionError from absurd nesting
-sets broken instead of raising; comments nest in Rust, Swift and Kotlin.
+sets broken instead of raising; comments nest in Rust, Swift and Kotlin;
+leading_blocks() stops at the first line of code, so a literal is never read.
 Never change without a decision: the language names and the blanking rule
 (newlines kept, offsets unchanged), which every line number depends on.
 """
@@ -406,3 +408,68 @@ def python_comments(text: str) -> Dict[int, str]:
         return found
     except (tokenize.TokenError, IndentationError, SyntaxError, ValueError):
         return legacy_comments(text, ("#", None, None))
+
+
+# ---- the comments that open a file ---------------------------------------------
+_COOKIE = re.compile(r"[ \t\f]*#.*?coding[:=][ \t]*[-\w.]+")
+
+
+def _block_comment(lines: List[str], i: int, text: str, closer: str) -> Tuple[List[str], str, int]:
+    """(text per line, what follows the closer, next line) of the block
+    comment that starts at line i with `text` after its opener."""
+    out: List[str] = []
+    while True:
+        end = text.find(closer)
+        if end != -1:
+            out.append(text[:end].lstrip("*!"))
+            return out, text[end + len(closer):], i + 1
+        out.append(text.lstrip("*!"))
+        i += 1
+        if i >= len(lines):
+            return out, "", i
+        text = lines[i].strip()
+
+
+def leading_blocks(text: str, style: Tuple[Optional[str], Optional[Tuple[str, str]], object],
+                   php: bool = False) -> List[Tuple[int, List[str]]]:
+    """(physical lines, text per line with the comment marks removed) for
+    each comment block in the file's initial non-code region: after a
+    shebang, an encoding cookie, a PHP opening tag and blank lines, and up
+    to the first line of code. A block is a run of consecutive line comments
+    or one block comment; a blank line ends a run."""
+    prefix, block, _ = style
+    lines = text.lstrip("\ufeff").splitlines()
+    out: List[Tuple[int, List[str]]] = []
+    run: List[str] = []
+    tag, i = php, 0
+    while i < len(lines):
+        s = lines[i].strip()
+        if (i == 0 and s.startswith("#!")) or (i < 2 and prefix == "#" and _COOKIE.match(lines[i])):
+            i += 1
+            continue
+        if tag and s:
+            tag = False
+            s = s[5:].strip() if s.startswith("<?php") else s
+        if not s:
+            if run:
+                out.append((len(run), run))
+                run = []
+            i += 1
+        elif prefix and s.startswith(prefix):
+            body = s[len(prefix):]
+            run.append(body[1:] if prefix == "//" and body[:1] in ("/", "!") else body)
+            i += 1
+        elif block and s.startswith(block[0]):
+            if run:
+                out.append((len(run), run))
+                run = []
+            first = i
+            body, rest, i = _block_comment(lines, i, s[len(block[0]):], block[1])
+            out.append((i - first, body))
+            if rest.strip():
+                return out
+        else:
+            break
+    if run:
+        out.append((len(run), run))
+    return out

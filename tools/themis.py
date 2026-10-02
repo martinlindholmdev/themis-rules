@@ -2,16 +2,15 @@
 """Refuses a change that leaves agent-written code harder to read than
 today, or that commits a likely secret.
 Purpose: measure recognised source files against the size and
-history-comment rules in RULES.md, scan a diff for credential shapes, and
-report whether enforcement is actually on.
+history-comment rules in RULES.md, require rule 2's header on new files,
+scan a diff for credential shapes, and report whether enforcement is on.
 Entry points: `check` with no flag checks the whole tree; `check --staged`
 checks staged files, the staged diff and a baseline that only shrinks
-(what the pre-commit hook runs); `check --range A...B` runs the same
-whole-tree check at commit B and scans the direct (two-dot) diff A..B for
-secrets, comparing the config and baseline against A instead of HEAD (what
-the CI backstop runs); `status` reports what is wired up; `rebaseline`
-lowers the baseline to today's sizes and refuses, writing nothing, if that
-would raise any number or add any entry — the baseline only ever goes down.
+(what the pre-commit hook runs); `check --range A...B` checks the tree at
+commit B and scans the two-dot diff A..B for secrets, against the config
+and baseline at A (what the CI backstop runs); `status` reports what is
+wired up; `rebaseline` lowers the baseline to today's sizes and refuses,
+writing nothing, if that would raise a number or add an entry.
 Invariants: standard library only, python3 3.9+, no network access;
 writes nothing except the baseline file, and only under `rebaseline`;
 every repo-specific value comes from `themis.json`, read fresh each run;
@@ -20,9 +19,10 @@ counted; a size or function limit may shrink, never grow; a matched
 secret is never printed, only its file, line and shape; git always runs
 with quotepath off, so non-ASCII filenames are measured; `--staged`
 enforces the config already on HEAD and the baseline already staged (or,
-failing that, on HEAD) — never an unstaged edit on disk — so editing
-either in the same commit does nothing; `--range A...B` does the same
-against A.
+failing that, on HEAD), never an unstaged edit on disk, so editing either
+in the same commit does nothing; `--range` does the same against A; the
+header check reads only files added relative to that base, under its
+config, and is skipped with a note when the base has no themis.json.
 Never change without a decision: the two hard limits, the marker text,
 the themis.json field names, and the secret pattern list — the three tools
 files are vendored byte-for-byte; themis_lang.py and themis_scan.py must sit
@@ -41,7 +41,7 @@ import sys
 from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Dict, List, Optional, Tuple
 
-SCRIPT_VERSION = "v3.2"
+SCRIPT_VERSION = "v3.3"
 
 FILE_MAX_LINES = 800
 FUNCTION_MAX_LINES = 100
@@ -129,6 +129,7 @@ def _with_defaults(data: dict) -> dict:
     data.setdefault("version", None)
     data.setdefault("baseline_path", "themis-baseline.json")
     data.setdefault("exempt_prefixes", [])
+    data.setdefault("header_exempt_prefixes", [])
     data.setdefault("extra_history_words", [])
     data.setdefault("extra_extensions", [])
     data.setdefault("decision_log", "the decision log")
@@ -390,6 +391,38 @@ def _generated_skip(root: Path, path: str, text: str, base_ref: str, found: Find
         found.notes.append("%s: %s" % (path, "treated as generated (%s)" % marker if honoured
                                        else "generated marker not honoured: new in this change"))
     return honoured
+
+def header_style(path: str):
+    """The comment syntax a header is read in; None for YAML and for a
+    file with no comment syntax."""
+    ext = Path(path).suffix
+    return None if ext in (".yaml", ".yml") else LANGUAGES.get(ext) or (_SLASH if ext in lang.EXTENSIONS else None)
+
+def header_report(root: Path, rev: str, diff_args: Tuple[str, ...], ref: Optional[str],
+                  untracked: bool = False) -> Tuple[List[str], List[str]]:
+    """(notes, problems) for rule 2 on the files added relative to `rev`
+    (a rename is not an addition), under the config committed at `rev`, so
+    a same-change edit of it does nothing. `untracked` adds the working
+    tree's untracked files (plain `check`)."""
+    base = load_config_from_rev(root, rev)
+    if base is None:
+        return ["header check skipped: no %s at %s" % (CONFIG_NAME, rev)], []
+    added = _git(root, "diff", *diff_args, "-M", "--name-only", "--diff-filter=A").splitlines()
+    if untracked:
+        added += _git(root, "ls-files", "-o", "--exclude-standard").splitlines()
+    problems = []
+    for path in sorted(set(added)):
+        style = header_style(path)
+        if (style is None or is_exempt(path, base) or path in SELF_PATHS
+                or any(path.startswith(p) for p in base["header_exempt_prefixes"])
+                or (ref is None and not (root / path).is_file())):
+            continue
+        why = lang.header_problem(read(root, path, ref), Path(path).suffix, style)
+        if why:
+            problems.append("%s: new file has no valid header (%s). Open it with a comment or docstring of at "
+                            "most %d lines whose lines start with %s, each followed by a colon and real text; "
+                            "see rule 2." % (path, why, lang.HEADER_MAX_LINES, ", ".join(lang.HEADER_LABELS)))
+    return [], problems
 
 def run_checks(root: Path, paths: List[str], ref: Optional[str], baseline: dict, config: dict,
                base_ref: str = "HEAD") -> Tuple[Findings, List[Measure]]:
@@ -658,7 +691,8 @@ def run_tree(root: Path, config: dict) -> int:
         return 1
     baseline = load_baseline(root, config)
     found, _ = run_checks(root, paths, None, baseline, config)
-    return _report(found.notes, found.problems, "themis: pass, %d file(s) checked" % len(paths))
+    notes, headers = header_report(root, "HEAD", ("HEAD",), None, untracked=True)
+    return _report(found.notes + notes, found.problems + headers, "themis: pass, %d file(s) checked" % len(paths))
 
 def _self_change_note(root: Path, diff_args: Tuple[str, ...]) -> List[str]:
     changed = changed_paths(root, *diff_args)
@@ -672,13 +706,17 @@ def run_staged(root: Path, config: dict) -> int:
         notes.append("%s changed; owner only — this commit is still checked "
                       "against the version already on HEAD" % CONFIG_NAME)
     blocking = secret_problems(root, "--cached") + baseline_problems(root, config, "HEAD", ":", ("--cached",))
+    header_notes, headers = header_report(root, "HEAD", ("--cached",), ":")
+    blocking += headers
     paths = staged_files(root, config)
     if paths:
         baseline = load_baseline_staged(root, config)
         found, _ = run_checks(root, paths, ":", baseline, config, "HEAD")
-        notes += found.notes
+        notes += found.notes + header_notes
         blocking += found.problems
     elif not blocking:
+        for note in header_notes:
+            print("note: " + note)
         print("themis: 0 staged source files; nothing to check")
         return 0
     return _report(notes, blocking, "themis: pass, %d file(s) checked" % len(paths))
@@ -704,8 +742,9 @@ def run_range(root: Path, config: dict, range_arg: str) -> int:
         return 1
     baseline = load_baseline(root, config, ref=b)
     found, _ = run_checks(root, paths, b, baseline, config, a)
-    notes += found.notes
-    blocking += found.problems
+    header_notes, headers = header_report(root, a, (span,), b)
+    notes += found.notes + header_notes
+    blocking += found.problems + headers
     return _report(notes, blocking, "themis: pass, %d file(s) checked at %s" % (len(paths), b))
 
 def main(argv: Optional[List[str]] = None) -> int:

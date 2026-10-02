@@ -6,8 +6,8 @@ in lines, mark Rust test modules, spot generated files, match history words
 in comments, and clamp per-extension limits to the hard limits.
 Entry points: EXTENSIONS, analyse(), functions(), comments(), test_spans(),
 generated(), generated_honoured(), history_hits(), measure_text(),
-clamp_limits(), lang_violations(); legacy_comments() and
-python_comments() are re-exported from themis_scan.
+clamp_limits(), lang_violations(), header_problem(); legacy_comments()
+and python_comments() are re-exported from themis_scan.
 Invariants: standard library only, python3 3.9+; pure functions over text,
 with no file or git access, no printing and no module-level mutable state;
 odd input yields notes, never an exception; time is linear in the file plus
@@ -24,11 +24,14 @@ at most the innermost eight enclosing types and functions; generated()
 returns a name from a closed list, never text from the file.
 Never change without a decision: the extension list, the key shape
 (Type.method, #n for repeats), the 2,000-character header window and the
-generated-file marker table.
+generated-file marker table, and the four header labels with their
+29-line ceiling; header_problem() returns a reason or None, never text
+from the file.
 """
 
 from __future__ import annotations
 
+import ast
 import importlib.util
 import json
 import re
@@ -46,6 +49,7 @@ _spec.loader.exec_module(_scan_module)
 Scan = _scan_module.Scan
 legacy_comments = _scan_module.legacy_comments
 python_comments = _scan_module.python_comments
+leading_blocks = _scan_module.leading_blocks
 
 _FAMILY = {
     ".rs": "rust", ".go": "go", ".swift": "swift", ".kt": "kotlin", ".kts": "kotlin",
@@ -656,3 +660,73 @@ def lang_violations(old_text: str, new_text: str, base_measure) -> List[str]:
         if got is None or got[1] < count:
             problems.append("lang history_words %s: %s is not backed by the base commit" % (path, count))
     return problems
+
+
+# ---- the file header (rule 2) ------------------------------------------------
+HEADER_LABELS = ("Purpose", "Entry points", "Invariants", "Never change without a decision")
+HEADER_MAX_LINES = 29
+_LABEL = re.compile(r"\s*\**\s*(purpose|entry\s+points?|invariants|never\s+change\s+without\s+a\s+decision)"
+                    r"\s*:(.*)", re.IGNORECASE)
+_PLACEHOLDER = re.compile(r"\W*(?:todo|tbd|tba)\b", re.IGNORECASE)
+_WORD = re.compile(r"[^\W\d_]{3,}")
+
+
+def _docstring(text: str) -> Optional[Tuple[int, List[str]]]:
+    """(physical lines, text lines) of the module docstring: the file's
+    first statement, when it is a plain string. None if there is none or
+    the file does not parse."""
+    try:
+        first = (ast.parse(text).body or [None])[0]
+    except (SyntaxError, ValueError):
+        return None
+    if isinstance(first, ast.Expr) and isinstance(first.value, ast.Constant) and isinstance(first.value.value, str):
+        return first.end_lineno - first.lineno + 1, first.value.value.splitlines()
+    return None
+
+
+def _block_problems(count: int, lines: List[str]) -> List[str]:
+    """What stops one comment block from being a header: too long, a label
+    missing, or a label with no real text (a word of three letters, not
+    led by TODO, TBD or TBA)."""
+    fields: Dict[str, str] = {}
+    current = ""
+    for line in lines:
+        m = _LABEL.match(line)
+        if m:
+            current = m.group(1).lower().split()[0]
+            fields[current] = fields.get(current, "") + " " + m.group(2)
+        elif current:
+            fields[current] += " " + line
+    keys = [label.lower().split()[0] for label in HEADER_LABELS]
+    problems = []
+    if count > HEADER_MAX_LINES:
+        problems.append("%d lines, the limit is %d" % (count, HEADER_MAX_LINES))
+    missing = [label for label, key in zip(HEADER_LABELS, keys) if key not in fields]
+    if missing:
+        problems.append("missing " + ", ".join(missing))
+    empty = [label for label, key in zip(HEADER_LABELS, keys)
+             if key in fields and (_PLACEHOLDER.match(fields[key]) or not _WORD.search(fields[key]))]
+    if empty:
+        problems.append("empty or placeholder " + ", ".join(empty))
+    return problems
+
+
+def header_problem(text: str, ext: str, style: Tuple[Optional[str], Optional[Tuple[str, str]], object]) -> Optional[str]:
+    """None if the file opens with a header: some comment block (or the
+    Python module docstring) in its initial non-code region holds all four
+    labels, each followed by a colon and real text, in at most 29 physical
+    lines. Otherwise the reason, from the block closest to passing. A file
+    with no non-blank line has nothing to open with and passes."""
+    text = text.lstrip("\ufeff")
+    if not text.strip():
+        return None
+    blocks = leading_blocks(text, style, php=ext == ".php")
+    if style[2] == "python":
+        doc = _docstring(text)
+        blocks += [doc] if doc else []
+    if not blocks:
+        return "no opening comment or docstring"
+    tried = [_block_problems(count, lines) for count, lines in blocks]
+    if any(not problems for problems in tried):
+        return None
+    return "; ".join(min(tried, key=len))

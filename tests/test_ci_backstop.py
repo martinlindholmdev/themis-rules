@@ -138,7 +138,7 @@ class CiBackstopTests(unittest.TestCase):
             (repo / "tools").mkdir()
             for name in ("themis.py", "themis_lang.py", "themis_scan.py"):
                 (repo / "tools" / name).write_bytes((ROOT / "tools" / name).read_bytes())
-            (repo / "themis.json").write_text('{"version": "v3.2"}\n', encoding="utf-8")
+            (repo / "themis.json").write_text('{"version": "v3.3"}\n', encoding="utf-8")
             (repo / "main.ts").write_text("export const a = 1;\n", encoding="utf-8")
             git(repo, "add", "-A")
             git(repo, "commit", "-q", "-m", "base")

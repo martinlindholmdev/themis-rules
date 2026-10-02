@@ -226,6 +226,7 @@ def plan_core_files(root: Path, notes: Optional[List[str]] = None) -> List[Chang
     # themis.json and AGENTS.md already written.
     safe_path(root, data["baseline_path"])
     data.setdefault("exempt_prefixes", [])
+    data.setdefault("header_exempt_prefixes", [])
     data.setdefault("extra_history_words", [])
     data.setdefault("extra_extensions", [])
     data.setdefault("decision_log", "DECISIONS.md")

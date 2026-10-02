@@ -17,6 +17,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from headers import SLASH
+
 sys.dont_write_bytecode = True
 ROOT = Path(__file__).resolve().parents[1]
 TOOLS = ("themis.py", "themis_lang.py", "themis_scan.py")
@@ -28,7 +30,7 @@ spec.loader.exec_module(lang)
 
 
 def ts_function(name, lines, marker=""):
-    return marker + "export function %s() {\n%s}\n" % (name, "".join("  step%d();\n" % i for i in range(lines)))
+    return marker + SLASH + "export function %s() {\n%s}\n" % (name, "".join("  step%d();\n" % i for i in range(lines)))
 
 
 class Repo:
@@ -40,7 +42,7 @@ class Repo:
         self.git("config", "user.name", "t")
         for name in tools:
             (self.path / "tools" / name).write_bytes((ROOT / "tools" / name).read_bytes())
-        self.write("themis.json", json.dumps(dict(config or {}, version="v3.2")))
+        self.write("themis.json", json.dumps(dict(config or {}, version="v3.3")))
         self.write("main.py", "x = 1\n")
 
     def git(self, *args):
@@ -123,7 +125,7 @@ class WiringTests(unittest.TestCase):
     def test_rust_test_module_lines_do_not_count_against_the_file(self):
         repo = self.repo()
         repo.commit()
-        production = "const A: u32 = 1;\n" * 700
+        production = SLASH + "const A: u32 = 1;\n" * 700
         tests = "mod tests {\n" + "    const B: u32 = 1;\n" * 198 + "}\n"
         for attribute, expected in (("#[cfg(test)]", 0), ("#[cfg(not(test))]", 1)):
             with self.subTest(attribute=attribute):
