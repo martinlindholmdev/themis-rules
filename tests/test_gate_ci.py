@@ -2,7 +2,7 @@
 do what the gate promises when run by bash: CI judges the proposed commit
 under the base commit's settings and checker, a base checker older than the
 gate is skipped rather than held, and a push is stopped by a failing gate
-but not by a ref deletion.
+but not by a ref deletion, and only a push to a protected branch is gated.
 Entry points: run by `python3 -m unittest discover -s tests`.
 Invariants: every repository is a throwaway under a TemporaryDirectory; the
 script and hook are the shipped text, run with bash standing in for the
@@ -66,11 +66,12 @@ class GateCiCase(unittest.TestCase):
         (self.repo / "test_sample.py").write_text(suite(3), encoding="utf-8")
         return self.commit("base")
 
-    def run_script(self, base, head):
+    def run_script(self, base, head, event="pull_request"):
         runner_temp = self.tmp / "runner_temp"
         runner_temp.mkdir(exist_ok=True)
-        env = {"PATH": os.environ["PATH"], "GITHUB_EVENT_NAME": "pull_request", "PR_BASE_SHA": base,
-               "EVENT_BEFORE": "", "GITHUB_SHA": head, "RUNNER_TEMP": str(runner_temp)}
+        env = {"PATH": os.environ["PATH"], "GITHUB_EVENT_NAME": event, "EVENT_BEFORE": "",
+               "GITHUB_SHA": head, "RUNNER_TEMP": str(runner_temp)}
+        env.update({"MG_BASE_SHA": base, "MG_HEAD_SHA": head} if event == "merge_group" else {"PR_BASE_SHA": base})
         return subprocess.run([self.bash, "-c", extract_pr_script(install.PLAN.GATE_WORKFLOW)],
                               cwd=str(self.repo), env=env, capture_output=True, text=True)
 
@@ -95,6 +96,25 @@ class GateWorkflowScript(GateCiCase):
         self.assertEqual(done.returncode, 0, done.stdout + done.stderr)
         self.assertIn("has no gate", done.stdout)
 
+    def test_a_queued_head_is_judged_by_the_base_and_its_own_gate_edits_are_ignored(self):
+        base = self.base_commit()
+        (self.repo / "test_sample.py").write_text(suite(1), encoding="utf-8")
+        config = json.loads((self.repo / "themis.json").read_text(encoding="utf-8"))
+        config["test"]["min_tests"] = 1
+        (self.repo / "themis.json").write_text(json.dumps(config), encoding="utf-8")
+        head = self.commit("delete tests and lower the floor in the same change")
+        done = self.run_script(base, head, event="merge_group")
+        self.assertNotEqual(done.returncode, 0, done.stdout + done.stderr)
+        self.assertIn("below the floor of 3", done.stdout)
+
+    def test_a_merge_group_event_without_a_base_sha_fails(self):
+        self.base_commit()
+        (self.repo / "notes.txt").write_text("a change\n", encoding="utf-8")
+        done = self.run_script("", self.commit("a change"), event="merge_group")
+        self.assertNotEqual(done.returncode, 0, done.stdout + done.stderr)
+        self.assertIn("no base SHA", done.stdout + done.stderr)
+        self.assertNotIn("gate PASS", done.stdout)
+
     def test_the_repos_own_themis_workflow_is_the_generated_one(self):
         shipped = (ROOT / ".github" / "workflows" / "themis.yml").read_text(encoding="utf-8")
         self.assertEqual(shipped, install.PLAN.CI_WORKFLOW)
@@ -105,7 +125,7 @@ class PrePushHook(GateCiCase):
         hook = self.repo / "tools" / "hooks" / "pre-push"
         hook.parent.mkdir(parents=True, exist_ok=True)
         hook.write_bytes((ROOT / "tools" / "hooks" / "pre-push").read_bytes())
-        line = "refs/heads/x %s refs/heads/x %s\n" % (local_sha, "0" * 40)
+        line = "refs/heads/x %s refs/heads/main %s\n" % (local_sha, "0" * 40)
         return subprocess.run([self.bash, str(hook)], cwd=str(self.repo), input=line, capture_output=True, text=True)
 
     def test_a_failing_gate_stops_a_push_but_a_ref_deletion_runs_nothing(self):
@@ -140,16 +160,14 @@ class PrePushRealPush(GateCiCase):
         self.commit("other tree")
         sh(self.repo, "checkout", "-q", self.green)
 
-    def test_only_a_commit_whose_tree_the_gate_tested_is_published(self):
-        refused = self.git_push("other")
+    def test_only_a_commit_whose_tree_the_gate_tested_reaches_main(self):
+        refused = self.git_push("other:refs/heads/main")
         self.assertNotEqual(refused.returncode, 0)
         self.assertIn("refs/heads/other", refused.stderr)
         self.assertNotIn("gate PASS", refused.stdout + refused.stderr)
-        both = self.git_push(self.green, "other")
-        self.assertNotEqual(both.returncode, 0)
-        allowed = self.git_push("HEAD:refs/heads/" + self.green)
-        self.assertEqual(allowed.returncode, 0, allowed.stdout + allowed.stderr)
-        self.assertIn("gate PASS", allowed.stdout + allowed.stderr)
+        mixed = self.git_push("other", "HEAD:refs/heads/main")
+        self.assertEqual(mixed.returncode, 0, mixed.stdout + mixed.stderr)
+        self.assertIn("gate PASS", mixed.stdout + mixed.stderr)
 
     def test_a_delete_only_push_runs_no_gate(self):
         self.assertEqual(self.git_push("HEAD:refs/heads/doomed").returncode, 0)

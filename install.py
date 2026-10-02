@@ -383,6 +383,8 @@ def main(argv: Optional[List[str]] = None) -> int:
                            help="the project's test command, run directly (not by a shell), e.g. \"python3 -m pytest\"")
     install_p.add_argument("--test-runner", metavar="NAME", default="",
                            help="how to read its output: unittest, pytest or cargo; guessed from the command if omitted")
+    install_p.add_argument("--pre-push", action="store_true",
+                           help="write the pre-push hook even when CI runs the gate")
     uninstall_p = sub.add_parser("uninstall")
     uninstall_p.add_argument("--dry-run", action="store_true")
     uninstall_p.add_argument("--yes", action="store_true", help="skip the confirmation prompt")

@@ -214,27 +214,75 @@ the decision log. There is no override flag and no environment variable.
 Where it runs. CI is the authority: `.github/workflows/themis-gate.yml`, a
 separate workflow with a job named `themis-gate`, takes the base commit's own
 copy of the checker (a base older than v3.4 has no gate, and the step is
-skipped) and runs `gate --range`. Install writes that file once, when the owner
+skipped) and runs `gate --range`. It runs on `pull_request`, `push` and
+`merge_group`. For a merge queue entry, BASE is the event's
+`merge_group.base_sha` (whose checker and `themis.json` decide) and HEAD is
+`merge_group.head_sha`; an event with no base SHA fails the job instead of
+falling back to the empty tree. Install writes that file once, when the owner
 sets a test command and the repository has a GitHub remote, and never rewrites
 it: the owner adds the toolchain and dependency steps the tests need above the
 gate step, and a re-run or an upgrade that would change its template prints the
-difference and leaves the file. The `themis` job stays Themis's own. Give the
-gate job no secrets and no self-hosted runner: it runs the project's tests on
-the proposed code. Whether the job is a required check is a branch-protection
-setting a clone cannot see; `status` says so.
+difference and leaves the file. The `themis` job stays Themis's own and has no
+`merge_group` trigger; an owner whose branch protection requires it in a merge
+queue adds one line under `on:` in `.github/workflows/themis.yml`:
 
-Locally, nothing runs at pre-commit. Once a test command is set, install adds
-`tools/hooks/pre-push` when none exists (active when git reads `tools/hooks`;
-an existing one that differs is yours and is never replaced, and any hook
-manager gets a printed line to add by hand), which runs `gate --reuse` on the
-checked-out commit. For each ref being pushed (a deletion is skipped) the hook
-first compares the pushed commit's tree with the checked-out commit's; if any
-differs it refuses the push, before any test runs, with one line naming the
-ref and saying to check it out and push from there. A plain `gate` run on a clean tree writes a receipt in
-`.git/themis/gate.json` (tree, command hash, counts) that `--reuse` and `status`
-read when the tree hash still matches. The receipt can be forged by anyone with
-the checkout: it is evidence for a reader and a way to skip a rerun, and CI
-never reads it.
+```
+  merge_group:
+```
+
+The shared script already reads the merge-group base and head. Install
+replaces a `themis.yml` that differs from its template, so that line must be
+added again after each upgrade. Give the gate job no secrets and no
+self-hosted runner: it runs the project's tests on the proposed code. Whether
+the job is a required check is a branch-protection setting a clone cannot see;
+`status` says so.
+
+Locally, nothing runs at pre-commit, and a push runs tests only when it updates
+a protected branch. `tools/hooks/pre-push` hands git's ref lines to `gate
+--pre-push`, which gates a line only when its destination is a branch in
+`test.pre_push_branches` (default `["main", "master"]`), read from HEAD's
+committed `themis.json` and from the destination's current commit when this
+clone has it, so a change cannot drop its own branch from the list. A push of
+feature branches, tags or deletions runs nothing; in a mixed push only the
+protected destinations are checked. Each gated commit must have the
+checked-out commit's tree, or the push is refused before any test runs, with
+one line naming the ref and saying to check it out and push from there. The
+gated run reuses the receipt when it covers that exact tree.
+
+Documents-only pushes. `test.docs_only` is a list of globs (`fnmatch`, where
+`*` also matches `/`); absent means nothing is skipped. On a gated push whose
+tree has no matching receipt, the gate reads the changed paths with `git diff
+--name-status -z --no-renames --ignore-submodules=none <receipt tree>
+HEAD^{tree}`. The receipt is reused only when it was written under the same
+command hash and the same `docs_only` list hash, and every changed path is a
+regular file (mode 100644 or 100755, the same on both sides, read from the
+trees themselves) matching a glob. A gitlink, symlink, mode change, an
+unlisted path, a git error or no receipt runs the full gate. The list comes
+from HEAD's committed `themis.json`; editing it changes its hash, so the
+change that edits it is never reused across. CI ignores the list.
+
+Install writes the pre-push hook only when no CI runs the gate (no GitHub
+remote, or no workflow running `gate`, counting the `themis-gate.yml` the same
+install writes) or the owner passes `--pre-push`; otherwise it says why it
+skipped it. It is active when git reads `tools/hooks`; an existing one that
+differs is yours and is never replaced, and any hook manager gets a printed
+line to add by hand. A plain `gate` run on a clean tree writes a receipt in
+`.git/themis/gate.json` (tree, command hash, `docs_only` hash, counts) that
+`--reuse`, `--pre-push` and `status` read. The receipt can be forged by anyone
+with the checkout: it is evidence for a reader and a way to skip a rerun, and
+CI never reads it.
+
+When an agent finishes. `test.quick` is an optional argv list, a fast subset of
+the tests the owner names by hand in `themis.json`; nothing runs it unasked.
+When it is set, install prints two snippets and writes neither: a Claude Code
+`Stop` hook for `.claude/settings.json`, which hands a failure back to the
+agent once (Anthropic's hooks guide: a `Stop` hook that exits 2 blocks the
+stop and shows its stderr to the agent; `stop_hook_active` marks a second
+stop, which is let through), and a Codex `notify` command for
+`~/.codex/config.toml`, which runs after each turn and appends the output to
+`.git/themis/quick.log` (OpenAI's Codex configuration guide: `notify` runs a
+program when a turn ends and cannot block it). The quick command is never the
+gate and proves nothing about a commit.
 
 Not covered: edits to the tests themselves, `pytest.ini`, `conftest.py`, skip
 markers, discovery or coverage exclusions and the workflows (only the command,
@@ -261,7 +309,8 @@ after it is committed. Fields:
 - `limits`: `{".ts": {"file": 500, "function": 80}}`; a per-extension limit
   that can only tighten. A value above the hard limit, or not a positive
   integer, is ignored. A baseline entry still allows what it allows.
-- `test`: the acceptance gate's command, runner and floor; see above.
+- `test`: the acceptance gate's command, runner and floor, and
+  `pre_push_branches`, `docs_only` and `quick`; see above.
 - `extra_history_words`, `extra_extensions`, `baseline_path` and
   `decision_log`.
 
@@ -306,7 +355,8 @@ set.
   "not configured: tests are honour-system".
 - `last local gate:` "tree matches HEAD, N tests" when the receipt covers the
   committed tree, else "none or stale".
-- `pre-push:` whether the gate hook is wired in this clone.
+- `pre-push:` whether the gate hook is wired in this clone (it gates only
+  pushes to a protected branch).
 
 A repository with no recognised source files fails rather than reporting
 clean.

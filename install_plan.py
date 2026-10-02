@@ -633,16 +633,26 @@ def _hooks_path_is_ours(root: Path, hook_changes: List[Change]) -> bool:
     path, location = THEMIS.hooks_dir(root)
     return location.startswith("core.hooksPath=") and path.resolve() == (root / "tools" / "hooks").resolve()
 
-def plan_pre_push(root: Path, has_test: bool, hook_changes: List[Change]) -> Tuple[List[Change], List[str]]:
+def ci_runs_gate(root: Path, gate_changes: List[Change]) -> bool:
+    """CI counts as present with a GitHub remote and a workflow that runs the
+    gate, including the themis-gate.yml this same install writes."""
+    return git_remote_is_github(root) and (bool(gate_changes) or THEMIS.gate.runs_gate_in_ci(root))
+
+def plan_pre_push(root: Path, has_test: bool, hook_changes: List[Change], ci: bool,
+                  forced: bool) -> Tuple[List[Change], List[str]]:
     """The pre-push hook that runs the gate, created when a test command is
-    set, git is going to read tools/hooks and no such file exists; an existing
-    one that differs is the owner's and is never replaced. Any other hook
-    setup gets the line to add by hand instead of an adapter."""
+    set, no CI runs the gate (or the owner passed --pre-push), git is going
+    to read tools/hooks and no such file exists; an existing one that differs
+    is the owner's and is never replaced. Any other hook setup gets the line
+    to add by hand instead of an adapter."""
     if not has_test:
         return [], []
+    if ci and not forced and read_text(root, PRE_PUSH_REL) is None:
+        return [], ["pre-push: not written, because CI runs the gate here; pass --pre-push to also gate "
+                    "pushes to main and master on this machine"]
     if not _hooks_path_is_ours(root, hook_changes):
         return [], ["pre-push: git does not read tools/hooks here (a hook manager or an existing hook is in "
-                    "charge); add `python3 tools/themis.py gate --reuse` to your pre-push by hand"]
+                    "charge); add `python3 tools/themis.py gate --pre-push` to your pre-push by hand"]
     source = (HERE / PRE_PUSH_REL).read_text(encoding="utf-8")
     current = read_text(root, PRE_PUSH_REL)
     if current is None:
@@ -650,7 +660,7 @@ def plan_pre_push(root: Path, has_test: bool, hook_changes: List[Change]) -> Tup
     if current == source:
         return [], []
     return [], ["%s exists and differs from this release's hook, so it is left as it is (your own checks "
-                "may be in it); make sure it runs `python3 tools/themis.py gate --reuse`" % PRE_PUSH_REL]
+                "may be in it); make sure it runs `python3 tools/themis.py gate --pre-push`" % PRE_PUSH_REL]
 
 def planned_test_section(root: Path, args: argparse.Namespace) -> Optional[dict]:
     """The "test" section the repository will have after this install: the
@@ -678,7 +688,9 @@ def build_install_plan(root: Path, args: argparse.Namespace) -> Tuple[List[Chang
     hook_changes, hook_notes = plan_hook(root)
     changes += hook_changes
     notes += hook_notes
-    push_changes, push_notes = plan_pre_push(root, test is not None, hook_changes)
+    gate_changes, gate_notes = plan_gate_workflow(root, test is not None)
+    push_changes, push_notes = plan_pre_push(root, test is not None, hook_changes,
+                                             ci_runs_gate(root, gate_changes), bool(getattr(args, "pre_push", False)))
     changes += push_changes
     notes += push_notes
     agents = tuple(a.strip().lower() for a in (getattr(args, "agents", None) or "").split(","))
@@ -689,9 +701,10 @@ def build_install_plan(root: Path, args: argparse.Namespace) -> Tuple[List[Chang
     changes += ci_changes
     if any(c.old is not None for c in ci_changes):
         notes.append("replacing .github/workflows/themis.yml: CI now takes all four checker files from the base commit")
-    gate_changes, gate_notes = plan_gate_workflow(root, test is not None)
     changes += gate_changes
     notes += gate_notes
+    if isinstance(test, dict) and isinstance(test.get("quick"), list) and test["quick"]:
+        notes.append(GATE.agent_finish_snippets(test["quick"]))
     if test is None:
         notes += _test_command_note(root)
     elif any(c.rel == THEMIS.CONFIG_NAME for c in changes):

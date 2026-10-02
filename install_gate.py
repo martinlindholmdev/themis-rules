@@ -5,14 +5,15 @@ the list of vendored checker files, and the functions that turn an
 `install --test-command` into a valid themis.json "test" section, suggest a
 command from file names, and describe how a workflow differs from its template.
 Entry points: install_plan.py imports TOOL_NAMES, CI_WORKFLOW, GATE_WORKFLOW,
-parse_test_command(), merged_test(), suggest_command() and
-workflow_difference(); never run directly.
+parse_test_command(), merged_test(), suggest_command(),
+agent_finish_snippets() and workflow_difference(); never run directly.
 Invariants: standard library only; no network access; nothing here reads or
 runs the target repository, it works on values handed in (file names, the
 existing "test" section); the command is stored as an argv list and a shell
 operator in it is refused, so nothing the owner types is ever run through a
 shell; both workflows resolve the checker from the base commit and share one
-resolving script.
+resolving script, which takes a merge queue entry's base and head from the
+merge_group event and fails when the base is missing.
 Never change without a decision: the file names in TOOL_NAMES, the workflow
 names and job names (an owner's required status check names a job), and the
 rule that themis-gate.yml is written once and never overwritten.
@@ -21,6 +22,7 @@ rule that themis-gate.yml is written once and never overwritten.
 from __future__ import annotations
 
 import difflib
+import json
 import shlex
 from pathlib import Path
 from typing import List, Optional
@@ -45,14 +47,24 @@ _CHECKOUT = """      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273
 
 #: shell that sets BASE and HEAD and puts the BASE commit's own copy of the
 #: checker files in $RUNNER_TEMP/themis_base; shared by both workflows.
-_RESOLVE_BASE = """          if [ "${{ github.event_name }}" = "pull_request" ]; then
+_RESOLVE_BASE = """          ZERO="0000000000000000000000000000000000000000"
+          EMPTY_TREE="4b825dc642cb6eb9a060e54bf8d69288fbee4904"
+          HEAD="${{ github.sha }}"
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
             BASE="${{ github.event.pull_request.base.sha }}"
+          elif [ "${{ github.event_name }}" = "merge_group" ]; then
+            # a merge queue entry: the queue's base commit decides, with
+            # its own checker and config; with no base SHA the job fails
+            # rather than judging the entry against the empty tree.
+            BASE="${{ github.event.merge_group.base_sha }}"
+            HEAD="${{ github.event.merge_group.head_sha }}"
+            if [ -z "$BASE" ] || [ "$BASE" = "$ZERO" ] || [ -z "$HEAD" ]; then
+              echo "themis: the merge_group event has no base SHA (or head SHA); failing" >&2
+              exit 1
+            fi
           else
             BASE="${{ github.event.before }}"
           fi
-          HEAD="${{ github.sha }}"
-          ZERO="0000000000000000000000000000000000000000"
-          EMPTY_TREE="4b825dc642cb6eb9a060e54bf8d69288fbee4904"
           if [ -z "$BASE" ] || [ "$BASE" = "$ZERO" ]; then
             # a brand-new branch has nothing to diff against (push) or
             # this PR itself installs Themis (no base copy yet) — git's
@@ -105,6 +117,7 @@ GATE_WORKFLOW = ("""name: themis-gate
 on:
   pull_request:
   push:
+  merge_group:
 permissions:
   contents: read
 jobs:
@@ -182,6 +195,22 @@ def suggest_command(names: List[str]) -> Optional[str]:
     if "package.json" in present:
         return "npm test (no runner preset for it: name a count_pattern in themis.json)"
     return None
+
+
+def agent_finish_snippets(quick: List[str]) -> str:
+    """The text install prints, never writes, for running test.quick when an
+    agent finishes a turn: a Claude Code Stop hook, which hands a failure
+    back to the agent once per stop (a second stop in a row is let through),
+    and a Codex `notify` command, which only reports."""
+    command = shlex.join(quick)
+    claude = {"hooks": {"Stop": [{"hooks": [{"type": "command", "command":
+              'grep -q \'"stop_hook_active": *true\' && exit 0; cd "$CLAUDE_PROJECT_DIR" && %s 1>&2 || exit 2'
+              % command}]}]}}
+    codex = 'notify = %s' % json.dumps(["sh", "-c", "%s >> .git/themis/quick.log 2>&1" % command, "themis"])
+    return ("test.quick is set; to run it when an agent finishes a turn, add by hand (nothing was written):\n"
+            "  Claude Code, .claude/settings.json (a failure is handed back to the agent):\n    %s\n"
+            "  Codex, ~/.codex/config.toml (runs after each turn, reports only):\n    %s"
+            % (json.dumps(claude), codex))
 
 
 def workflow_difference(rel: str, current: str, template: str) -> str:

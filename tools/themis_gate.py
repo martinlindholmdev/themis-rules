@@ -5,8 +5,9 @@ exact committed tree, read how many tests ran and were skipped from its
 output, and fail on an error, no count, too few tests or too many skips;
 also holds the git runner and the hook, CI and gate lines `status` prints.
 Entry points: run() for `themis.py gate` (plain, --range A...B, --reuse,
---record, --lower N --reason TEXT), add_arguments(), parse_test_config(),
-status_lines(), git(), hooks_dir(), hook_status().
+--pre-push, --record, --lower N --reason TEXT), add_arguments(),
+parse_test_config(), runs_gate_in_ci(), status_lines(), git(), hooks_dir(),
+hook_status().
 Invariants: standard library only, python3 3.9+, no network access; the
 command is an argv list run without a shell and with no stdin; its
 settings come from the BASE commit's themis.json (A for --range, HEAD
@@ -16,7 +17,8 @@ again after it, except under the owner's ignore_paths; stdout and stderr are
 merged and ANSI codes stripped before the output is read; a missing count is
 a failure, never a zero; a pass names the commit and tree it covers; the
 local receipt in .git is evidence for a reader and a skip-the-rerun cache,
-never read by CI; writes only that receipt, themis.json under --record and
+never read by CI; --pre-push gates only a push to a protected branch and
+reuses the receipt across a documents-only change; writes only that receipt, themis.json under --record and
 --lower, and the decision log under --lower.
 Never change without a decision: the themis.json "test" key names and their
 meaning, the runner presets, the PASS line, and the rule that the base
@@ -28,11 +30,13 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import fnmatch
 import os
 import re
 import shutil
 import signal
 import subprocess
+import sys
 from pathlib import Path
 from typing import Callable, List, NamedTuple, Optional, Tuple
 
@@ -119,6 +123,14 @@ def _workflow_texts(root: Path) -> List[str]:
             for p in sorted(workflows.iterdir()) if p.suffix in (".yml", ".yaml") and p.is_file()]
 
 
+_RUNS_GATE = re.compile(r"%s\"?\s+gate\b" % re.escape(SELF_NAME))
+
+
+def runs_gate_in_ci(root: Path) -> bool:
+    """True when a workflow file runs the gate."""
+    return any(_RUNS_GATE.search(t) for t in _workflow_texts(root))
+
+
 def ci_line(root: Path, configured: bool) -> str:
     """What the workflow files show; whether the job is a required check, and
     whether its triggers cover every branch, is not something a clone can see."""
@@ -126,7 +138,7 @@ def ci_line(root: Path, configured: bool) -> str:
     if not any(SELF_NAME in t for t in texts):
         return "CI: no workflow runs %s" % SELF_NAME
     line = "CI: workflow wiring detected (a workflow runs %s" % SELF_NAME
-    if configured and not any(re.search(r"%s\"?\s+gate\b" % re.escape(SELF_NAME), t) for t in texts):
+    if configured and not runs_gate_in_ci(root):
         return line + ", but none runs the gate: tests are not checked on the server)"
     return line + "); a required check, branch protection and trigger coverage are not verified"
 
@@ -141,6 +153,9 @@ class GateConfig(NamedTuple):
     max_skipped: int
     timeout: int
     ignore: List[str]
+    branches: List[str]
+    docs_only: Optional[List[str]]
+    quick: Optional[List[str]]
 
 
 def _pattern(value: object, name: str, problems: List[str]) -> Optional["re.Pattern[str]"]:
@@ -164,6 +179,16 @@ def _whole(raw: dict, key: str, default: int, low: int, high: int, problems: Lis
         problems.append("test.%s must be a whole number from %d to %d" % (key, low, high))
         return default
     return value
+
+
+def _strings(raw: dict, key: str, default: Optional[List[str]], problems: List[str]) -> Optional[List[str]]:
+    value = raw.get(key, default)
+    if value is None:
+        return None
+    if not isinstance(value, list) or not all(isinstance(v, str) and v and "\0" not in v for v in value):
+        problems.append("test.%s must be a list of non-empty strings" % key)
+        return default
+    return list(value)
 
 
 def parse_test_config(raw: object) -> Tuple[Optional[GateConfig], List[str]]:
@@ -199,12 +224,18 @@ def parse_test_config(raw: object) -> Tuple[Optional[GateConfig], List[str]]:
     if not isinstance(ignore, list) or not all(isinstance(p, str) and p for p in ignore):
         problems.append("test.ignore_paths must be a list of non-empty path prefixes")
         ignore = []
+    branches = _strings(raw, "pre_push_branches", ["main", "master"], problems) or []
+    docs_only = _strings(raw, "docs_only", None, problems)
+    quick = _strings(raw, "quick", None, problems)
+    if quick == []:
+        problems.append("test.quick must name a command (an argv list) when present")
     floor = _whole(raw, "min_tests", 1, 1, 10 ** 9, problems)
     ceiling = _whole(raw, "max_skipped", 0, 0, 10 ** 9, problems)
     timeout = _whole(raw, "timeout", 1800, 1, 86400, problems)
     if problems or count is None:
         return None, problems
-    return GateConfig(list(command), count, skip, floor, ceiling, timeout, list(ignore)), []
+    return GateConfig(list(command), count, skip, floor, ceiling, timeout, list(ignore),
+                      branches, docs_only, quick), []
 
 
 def raw_test_at(root: Path, rev: str) -> Tuple[object, Optional[str]]:
@@ -262,7 +293,8 @@ def judge(cfg: GateConfig, output: str, status: Optional[int],
     return ran, skipped, problems
 
 
-def command_hash(command: List[str]) -> str:
+def command_hash(command: Optional[List[str]]) -> str:
+    """A short hash of a list of strings: the test command or the docs_only globs."""
     return hashlib.sha256(json.dumps(command).encode("utf-8")).hexdigest()[:12]
 
 
@@ -367,6 +399,41 @@ def _matching_receipt(root: Path, cfg: GateConfig) -> Optional[dict]:
     return None
 
 
+def _modes(root: Path, tree: str) -> dict:
+    """path -> mode for every entry of `tree`, a gitlink included."""
+    out = git(root, "ls-tree", "-r", "-z", "--full-tree", tree)
+    return {entry.split("\t", 1)[1]: entry.split(" ", 1)[0] for entry in out.split("\0") if "\t" in entry}
+
+
+def _docs_only_receipt(root: Path, cfg: GateConfig) -> Optional[dict]:
+    """The receipt, when it was written under this command and this docs_only
+    list and every path changed since its tree is a regular file, of the same
+    mode on both sides, matching a docs_only glob. A gitlink, symlink, mode
+    change or any git error means no reuse."""
+    receipt = read_receipt(root)
+    if (not cfg.docs_only or not receipt or receipt.get("command") != command_hash(cfg.command)
+            or receipt.get("docs_only") != command_hash(cfg.docs_only)):
+        return None
+    old = receipt.get("tree")
+    if not isinstance(old, str) or not re.fullmatch(r"[0-9a-f]{40}|[0-9a-f]{64}", old):
+        return None
+    try:
+        fields = [f for f in git(root, "diff", "--name-status", "-z", "--no-renames", "--ignore-submodules=none",
+                                 old, "HEAD^{tree}").split("\0") if f]
+        before, after = _modes(root, old), _modes(root, "HEAD^{tree}")
+    except subprocess.CalledProcessError:
+        return None
+    if len(fields) % 2:
+        return None
+    for path in fields[1::2]:
+        modes = {before.get(path), after.get(path)} - {None}
+        if len(modes) != 1 or not modes <= {"100644", "100755"}:
+            return None
+        if not any(fnmatch.fnmatchcase(path, glob) for glob in cfg.docs_only):
+            return None
+    return receipt
+
+
 # ------------------------------------------------------------------ the gate
 
 def _fail(problems: List[str], output: str = "") -> int:
@@ -402,12 +469,17 @@ def _load(root: Path, cfg_rev: str) -> Tuple[Optional[GateConfig], int]:
     return cfg, -1
 
 
-def execute(root: Path, cfg_rev: str, target: str, local: bool, reuse: bool) -> Tuple[int, Optional[GateConfig], int]:
-    """Gates `target` under the settings committed at `cfg_rev`. Returns
-    (exit status, config, tests that ran)."""
-    cfg, ended = _load(root, cfg_rev)
+def execute(root: Path, cfg_rev: str, target: str, local: bool, reuse: bool,
+            cfg: Optional[GateConfig] = None) -> Tuple[int, Optional[GateConfig], int]:
+    """Gates `target` under the settings committed at `cfg_rev`, or under
+    `cfg` when the caller already loaded them from there; that caller is the
+    pre-push gate, which also reuses a receipt across a documents-only change.
+    Returns (exit status, config, tests that ran)."""
+    docs = cfg is not None
     if cfg is None:
-        return ended, None, 0
+        cfg, ended = _load(root, cfg_rev)
+        if cfg is None:
+            return ended, None, 0
     commit, head = _rev(root, target + "^{commit}"), _rev(root, "HEAD")
     if commit is None or commit != head:
         return _fail(["the checked-out commit is not %s; the gate runs only on the commit it names" % target]), cfg, 0
@@ -416,9 +488,13 @@ def execute(root: Path, cfg_rev: str, target: str, local: bool, reuse: bool) -> 
     if before:
         return _fail(before), cfg, 0
     receipt = _matching_receipt(root, cfg) if reuse else None
+    note = " (reused: the local run on this exact tree)"
+    if receipt is None and docs:
+        receipt = _docs_only_receipt(root, cfg)
+        note = " (reused: only docs_only files changed since the local run on tree %s)" % (
+            receipt or {}).get("tree", "")[:12]
     if receipt:
-        print(_pass_line(commit, tree, cfg, receipt.get("tests", 0), receipt.get("skipped"),
-                         " (reused: the local run on this exact tree)"))
+        print(_pass_line(commit, tree, cfg, receipt.get("tests", 0), receipt.get("skipped"), note))
         return 0, cfg, int(receipt.get("tests", 0))
     result = run_command(root, cfg)
     if result.error:
@@ -430,8 +506,46 @@ def execute(root: Path, cfg_rev: str, target: str, local: bool, reuse: bool) -> 
     print(_pass_line(commit, tree, cfg, ran, skipped))
     if local:
         write_receipt(root, {"commit": commit, "tree": tree, "command": command_hash(cfg.command),
-                             "tests": ran, "skipped": skipped})
+                             "docs_only": command_hash(cfg.docs_only), "tests": ran, "skipped": skipped})
     return 0, cfg, ran
+
+
+def _branches_at(root: Path, rev: str) -> List[str]:
+    """test.pre_push_branches committed at `rev` (the destination's current
+    commit), or none when that commit is absent here or has no valid list;
+    it widens HEAD's list, so a change cannot unprotect the branch it updates."""
+    if set(rev) == {"0"} or _rev(root, rev + "^{commit}") is None:
+        return []
+    raw, why = raw_test_at(root, rev)
+    cfg, _ = parse_test_config(raw) if why is None else (None, [])
+    return cfg.branches if cfg is not None else []
+
+
+def pre_push(root: Path, lines: List[str]) -> int:
+    """The pre-push hook's gate. Each stdin line is `local-ref local-sha
+    remote-ref remote-sha`; only a line updating a protected branch
+    (test.pre_push_branches at HEAD or at the destination's current commit)
+    is gated, and each such commit must
+    have the checked-out tree, since that is the tree the gate tests."""
+    pushes = [p for p in (line.split() for line in lines) if len(p) == 4 and set(p[1]) != {"0"}]
+    if not pushes:
+        return 0
+    cfg, ended = _load(root, "HEAD")
+    if cfg is None:
+        return ended
+    gated = [p for p in pushes if p[2].startswith("refs/heads/")
+             and p[2][len("refs/heads/"):] in cfg.branches + _branches_at(root, p[3])]
+    if not gated:
+        print("themis: pre-push: nothing pushed to %s, so no tests run here; CI runs them"
+              % (", ".join(_safe(b) for b in cfg.branches) or "a protected branch"))
+        return 0
+    head_tree = _rev(root, "HEAD^{tree}")
+    for local_ref, local_sha, _, _ in gated:
+        if head_tree is None or _rev(root, local_sha + "^{tree}") != head_tree:
+            sys.stderr.write("themis: %s is not the checked-out commit, so the gate has not tested it; "
+                             "check it out and push from there\n" % _safe(local_ref))
+            return 1
+    return execute(root, "HEAD", "HEAD", True, True, cfg)[0]
 
 
 # ------------------------------------------------- owner-only changes to the floor
@@ -507,6 +621,8 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
     group = parser.add_mutually_exclusive_group()
     group.add_argument("--range", metavar="A...B", help="CI: gate commit B under the settings committed at A")
     group.add_argument("--reuse", action="store_true", help="skip the run when the last local run covers this tree")
+    group.add_argument("--pre-push", action="store_true",
+                       help="the pre-push hook: read git's ref lines on stdin, gate only a push to a protected branch")
     group.add_argument("--record", action="store_true", help="after a pass, raise min_tests to the tests that ran")
     group.add_argument("--lower", type=int, metavar="N", help="owner only: lower min_tests to N")
     parser.add_argument("--reason", help="with --lower: why, in one line; written to the decision log")
@@ -518,6 +634,8 @@ def run(root: Path, args: argparse.Namespace, safe_path: Callable[[Path, str], P
     if args.reason is not None:
         print("themis: --reason goes with --lower")
         return 2
+    if args.pre_push:
+        return pre_push(root, sys.stdin.read().splitlines())
     cfg_rev, target = "HEAD", "HEAD"
     if args.range:
         if "..." not in args.range:
@@ -540,7 +658,7 @@ def _pre_push_line(root: Path) -> str:
     hook = hooks_path / "pre-push"
     if hook.is_file() and re.search(r"%s\"?\s+gate\b" % re.escape(SELF_NAME),
                                     hook.read_text(encoding="utf-8", errors="replace")):
-        return "pre-push: runs the gate before a push"
+        return "pre-push: runs the gate before a push to a protected branch"
     return "pre-push: not wired in this clone; the gate runs in CI only"
 
 

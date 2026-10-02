@@ -173,3 +173,30 @@ there. `tools/themis.py` and `install.py` never raise this file, and
   large input (a ratio between the linear and quadratic expectation, best of
   three runs) instead of absolute seconds, so a slow shared runner cannot fail
   them and a quadratic scanner still does.
+- This is release v3.5, and installs of v3 to v3.4 are offered the upgrade;
+  an existing pre-push hook or gate workflow is not replaced, and
+  docs/install.md gives the manual refresh.
+- The gate workflow runs on `merge_group` too: BASE is the event's
+  `merge_group.base_sha` and HEAD its `merge_group.head_sha`, and an event
+  with no base SHA fails the job instead of falling back to the empty tree,
+  because a queue entry judged against nothing would pass unchecked. The
+  `themis` workflow gets no `merge_group` trigger; docs/checks.md gives the
+  line an owner adds.
+- The pre-push hook gates only a push whose destination is a protected
+  branch, `test.pre_push_branches` (default main and master), read from HEAD
+  and from the destination's current commit, so a feature-branch push runs
+  nothing and the full suite stands at the merge into main, where CI is the
+  authority. The pushed-tree check holds for every gated ref.
+- Install writes the pre-push hook only when no CI runs the gate (no GitHub
+  remote, or no workflow running the gate, counting the gate workflow the
+  same install writes) or the owner passes `--pre-push`; otherwise it prints
+  why, because a repository with CI does not need every push held locally.
+- `test.docs_only` globs let a protected-branch push reuse the last local run
+  when every path changed since its tree is a regular file at a listed path;
+  a gitlink, symlink, mode change, an unlisted path, a git error, a receipt
+  under another command or another list, or none, runs the full gate. CI
+  ignores the list.
+- `test.quick` is an owner-set fast command; install prints, never writes, a
+  Claude Code `Stop` hook and a Codex `notify` line that run it when an agent
+  finishes, and adds no install flag for it, because agent configuration
+  belongs to the owner.

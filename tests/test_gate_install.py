@@ -1,5 +1,6 @@
 """Purpose: prove what install does for the acceptance gate: nothing unless the
-owner sets a test command, the right files when they do, and never an
+owner sets a test command, the right files when they do (the pre-push
+hook only where no CI runs the gate, or when asked), and never an
 overwrite of the gate workflow the owner has added their toolchain to, on a
 reinstall, an upgrade or an uninstall.
 Entry points: run by `python3 -m unittest discover -s tests`.
@@ -24,7 +25,7 @@ CUSTOM_STEP = "      - run: echo owner toolchain step\n"
 
 
 class GateInstallCase(unittest.TestCase):
-    def repo(self):
+    def repo(self, github=True):
         tmp = tempfile.TemporaryDirectory()
         self.addCleanup(tmp.cleanup)
         repo = Path(tmp.name) / "repo"
@@ -32,7 +33,8 @@ class GateInstallCase(unittest.TestCase):
         self.git(repo, "init", "-q")
         self.git(repo, "config", "user.email", "t@example.com")
         self.git(repo, "config", "user.name", "t")
-        self.git(repo, "remote", "add", "origin", "https://github.com/example/repo")
+        if github:
+            self.git(repo, "remote", "add", "origin", "https://github.com/example/repo")
         (repo / "main.py").write_text("def add(a, b):\n    return a + b\n", encoding="utf-8")
         self.git(repo, "add", "-A")
         self.git(repo, "commit", "-q", "-m", "init", "--no-verify")
@@ -60,15 +62,7 @@ class WhatInstallWrites(GateInstallCase):
         self.assertTrue((repo / "tools/themis_gate.py").is_file())
         self.assertIn("honour-system", done.stdout)
 
-    def test_a_test_command_writes_the_config_the_workflow_and_the_pre_push_hook(self):
-        repo = self.repo()
-        done = self.install(repo, "--test-command", "python3 -m pytest -q")
-        self.assertEqual(done.returncode, 0, done.stdout + done.stderr)
-        self.assertEqual(self.config(repo)["test"], {"command": ["python3", "-m", "pytest", "-q"],
-                                                       "runner": "pytest", "min_tests": 1, "max_skipped": 0})
-        gate_ci = (repo / GATE_YML).read_text(encoding="utf-8")
-        self.assertIn("name: themis-gate", gate_ci)
-        self.assertIn('themis.py" gate --range', gate_ci)
+    def assert_hook_written(self, repo):
         hook = repo / "tools/hooks/pre-push"
         if sys.platform == "win32":
             # Windows file systems have no executable bit and Git for Windows
@@ -77,7 +71,33 @@ class WhatInstallWrites(GateInstallCase):
         else:
             self.assertTrue(hook.stat().st_mode & 0o100)
         self.assertEqual(self.git(repo, "config", "core.hooksPath").stdout.strip(), "tools/hooks")
+
+    def test_a_test_command_with_ci_writes_the_config_and_workflow_and_skips_the_hook(self):
+        repo = self.repo()
+        done = self.install(repo, "--test-command", "python3 -m pytest -q")
+        self.assertEqual(done.returncode, 0, done.stdout + done.stderr)
+        self.assertEqual(self.config(repo)["test"], {"command": ["python3", "-m", "pytest", "-q"],
+                                                       "runner": "pytest", "min_tests": 1, "max_skipped": 0})
+        gate_ci = (repo / GATE_YML).read_text(encoding="utf-8")
+        self.assertIn("name: themis-gate", gate_ci)
+        self.assertIn('themis.py" gate --range', gate_ci)
+        self.assertFalse((repo / "tools/hooks/pre-push").exists())
+        self.assertIn("--pre-push", done.stdout)
         self.assertIn("gate --record", done.stdout)
+
+    def test_without_ci_the_pre_push_hook_is_written(self):
+        repo = self.repo(github=False)
+        done = self.install(repo, "--test-command", "python3 -m unittest")
+        self.assertEqual(done.returncode, 0, done.stdout + done.stderr)
+        self.assertFalse((repo / GATE_YML).exists())
+        self.assert_hook_written(repo)
+
+    def test_pre_push_forces_the_hook_beside_ci(self):
+        repo = self.repo()
+        done = self.install(repo, "--test-command", "python3 -m unittest", "--pre-push")
+        self.assertEqual(done.returncode, 0, done.stdout + done.stderr)
+        self.assertTrue((repo / GATE_YML).is_file())
+        self.assert_hook_written(repo)
 
     def test_a_shell_operator_or_an_unknown_runner_is_refused_before_anything_is_written(self):
         repo = self.repo()
@@ -91,7 +111,7 @@ class WhatInstallWrites(GateInstallCase):
 
     def test_uninstall_removes_the_untouched_gate_files_and_keeps_an_edited_workflow(self):
         repo = self.repo()
-        self.install(repo, "--test-command", "python3 -m unittest")
+        self.install(repo, "--test-command", "python3 -m unittest", "--pre-push")
         gone = self.install(repo, command="uninstall")
         self.assertEqual(gone.returncode, 0, gone.stdout + gone.stderr)
         self.assertFalse((repo / GATE_YML).exists() or (repo / "tools/hooks/pre-push").exists())
@@ -106,7 +126,7 @@ class WhatInstallWrites(GateInstallCase):
 class OwnerSetupSurvives(GateInstallCase):
     def customized_repo(self):
         repo = self.repo()
-        self.install(repo, "--test-command", "python3 -m unittest")
+        self.install(repo, "--test-command", "python3 -m unittest", "--pre-push")
         self.git(repo, "add", "-A")
         self.git(repo, "commit", "-q", "-m", "install", "--no-verify")
         path = repo / GATE_YML
@@ -127,13 +147,13 @@ class OwnerSetupSurvives(GateInstallCase):
         hook = repo / "tools/hooks/pre-push"
         edited = hook.read_text(encoding="utf-8") + "echo owner-check\n"
         hook.write_text(edited, encoding="utf-8")
-        done = self.install(repo, "--test-command", "python3 -m unittest")
+        done = self.install(repo, "--test-command", "python3 -m unittest", "--pre-push")
         self.assertEqual(done.returncode, 0, done.stdout + done.stderr)
         self.assertEqual(hook.read_text(encoding="utf-8"), edited)
         self.assertIn("left as it is", done.stdout)
         hook.unlink()
-        self.install(repo)
-        self.assertIn("gate --reuse", hook.read_text(encoding="utf-8"))
+        self.install(repo, "--pre-push")
+        self.assertIn("gate --pre-push", hook.read_text(encoding="utf-8"))
 
     def test_an_upgrade_from_the_previous_release_leaves_them_too(self):
         repo, custom = self.customized_repo()

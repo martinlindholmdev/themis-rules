@@ -2,6 +2,7 @@ name: themis-gate
 on:
   pull_request:
   push:
+  merge_group:
 permissions:
   contents: read
 jobs:
@@ -21,14 +22,24 @@ jobs:
       # no self-hosted runner: it runs your tests on the proposed code.
       - name: themis gate
         run: |
+          ZERO="0000000000000000000000000000000000000000"
+          EMPTY_TREE="4b825dc642cb6eb9a060e54bf8d69288fbee4904"
+          HEAD="${{ github.sha }}"
           if [ "${{ github.event_name }}" = "pull_request" ]; then
             BASE="${{ github.event.pull_request.base.sha }}"
+          elif [ "${{ github.event_name }}" = "merge_group" ]; then
+            # a merge queue entry: the queue's base commit decides, with
+            # its own checker and config; with no base SHA the job fails
+            # rather than judging the entry against the empty tree.
+            BASE="${{ github.event.merge_group.base_sha }}"
+            HEAD="${{ github.event.merge_group.head_sha }}"
+            if [ -z "$BASE" ] || [ "$BASE" = "$ZERO" ] || [ -z "$HEAD" ]; then
+              echo "themis: the merge_group event has no base SHA (or head SHA); failing" >&2
+              exit 1
+            fi
           else
             BASE="${{ github.event.before }}"
           fi
-          HEAD="${{ github.sha }}"
-          ZERO="0000000000000000000000000000000000000000"
-          EMPTY_TREE="4b825dc642cb6eb9a060e54bf8d69288fbee4904"
           if [ -z "$BASE" ] || [ "$BASE" = "$ZERO" ]; then
             # a brand-new branch has nothing to diff against (push) or
             # this PR itself installs Themis (no base copy yet) — git's

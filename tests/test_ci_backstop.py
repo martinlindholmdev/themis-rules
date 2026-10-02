@@ -66,6 +66,8 @@ def extract_pr_script(workflow_text: str) -> str:
     dedented = re.sub(r"\$\{\{\s*github\.event_name\s*\}\}", "$GITHUB_EVENT_NAME", dedented)
     dedented = re.sub(r"\$\{\{\s*github\.event\.pull_request\.base\.sha\s*\}\}", "$PR_BASE_SHA", dedented)
     dedented = re.sub(r"\$\{\{\s*github\.event\.before\s*\}\}", "$EVENT_BEFORE", dedented)
+    dedented = re.sub(r"\$\{\{\s*github\.event\.merge_group\.base_sha\s*\}\}", "$MG_BASE_SHA", dedented)
+    dedented = re.sub(r"\$\{\{\s*github\.event\.merge_group\.head_sha\s*\}\}", "$MG_HEAD_SHA", dedented)
     dedented = re.sub(r"\$\{\{\s*github\.sha\s*\}\}", "$GITHUB_SHA", dedented)
     return dedented
 

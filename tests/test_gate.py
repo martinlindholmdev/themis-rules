@@ -83,6 +83,7 @@ class GateCase(unittest.TestCase):
                   "sys.exit(subprocess.call([sys.executable, '-m', 'unittest']))\n")
         repo = self.repo()
         self.write(repo, "run_tests.py", script)
+        self.write(repo, ".gitignore", "ran.log\n")
         self.set_test(repo, command=[sys.executable, "run_tests.py"])
         return repo
 
@@ -259,6 +260,85 @@ class LocalReceipt(GateCase):
         self.assertEqual((saved["min_tests"], saved["floor_reason"]), (1, "two tests were exact duplicates"))
         self.assertIn("lowered from 3 to 1: two tests were exact duplicates", (repo / "DECISIONS.md").read_text())
         self.assertEqual(self.gate(repo, "--lower", "5", "--reason", "raise").returncode, 1)
+
+
+class PrePush(GateCase):
+    """`gate --pre-push` reads the lines git hands a pre-push hook on stdin."""
+
+    def pre_push(self, repo, remote_ref="refs/heads/main"):
+        line = "refs/heads/work %s %s %s\n" % (sh(repo, "rev-parse", "HEAD"), remote_ref, "0" * 40)
+        return subprocess.run([sys.executable, str(repo / "tools" / "themis.py"), "gate", "--pre-push"],
+                              cwd=str(repo), input=line, capture_output=True, text=True)
+
+    def ran(self, repo):
+        path = repo / "ran.log"
+        return path.read_text() if path.exists() else ""
+
+    def docs_repo(self, docs_only):
+        """A counting repo with a docs_only list and a receipt from one run."""
+        repo = self.counting_repo()
+        self.set_test(repo, docs_only=docs_only)
+        self.assertEqual(self.gate(repo).returncode, 0)
+        return repo
+
+    def test_a_feature_branch_push_runs_nothing(self):
+        repo = self.counting_repo()
+        done = self.pre_push(repo, "refs/heads/feature")
+        self.assertEqual(done.returncode, 0, done.stdout + done.stderr)
+        self.assertEqual(self.ran(repo), "")
+        self.assertNotIn("gate PASS", done.stdout)
+
+    def test_a_main_push_runs_the_gate(self):
+        repo = self.counting_repo()
+        done = self.pre_push(repo)
+        self.assertEqual(done.returncode, 0, done.stdout + done.stderr)
+        self.assertIn("gate PASS", done.stdout)
+        self.assertEqual(self.ran(repo), "x")
+
+    def test_a_documents_only_main_push_reuses_the_last_run(self):
+        repo = self.docs_repo(["*.md"])
+        self.write(repo, "README.md", "words\n")
+        self.commit(repo, "docs")
+        done = self.pre_push(repo)
+        self.assertEqual(done.returncode, 0, done.stdout + done.stderr)
+        self.assertIn("reused", done.stdout)
+        self.assertEqual(self.ran(repo), "x")
+
+    def test_a_listed_document_beside_an_unlisted_file_runs_the_gate(self):
+        repo = self.docs_repo(["*.md"])
+        self.write(repo, "README.md", "words\n")
+        self.write(repo, "notes.txt", "code-adjacent\n")
+        self.commit(repo, "docs and more")
+        done = self.pre_push(repo)
+        self.assertEqual(done.returncode, 0, done.stdout + done.stderr)
+        self.assertNotIn("reused", done.stdout)
+        self.assertEqual(self.ran(repo), "xx")
+
+    def test_a_list_edited_in_the_same_change_is_ignored(self):
+        repo = self.docs_repo(["*.md", "*.json"])
+        data = json.loads((repo / "themis.json").read_text(encoding="utf-8"))
+        data["test"]["docs_only"] = ["*.md", "*.json", "*.txt"]
+        self.write(repo, "themis.json", json.dumps(data))
+        self.write(repo, "notes.txt", "now listed by this very change\n")
+        self.commit(repo, "widen the list")
+        done = self.pre_push(repo)
+        self.assertNotIn("reused", done.stdout)
+        self.assertEqual(self.ran(repo), "xx")
+
+    def test_an_unlisted_submodule_update_beside_a_document_runs_the_gate(self):
+        repo = self.counting_repo()
+        self.set_test(repo, docs_only=["*.md"])
+        sh(repo, "config", "diff.ignoreSubmodules", "all")
+        sh(repo, "update-index", "--add", "--cacheinfo", "160000,%s,sub" % sh(repo, "rev-parse", "HEAD"))
+        sh(repo, "commit", "-q", "-m", "a submodule", "--no-verify")
+        self.assertEqual(self.gate(repo).returncode, 0)
+        sh(repo, "update-index", "--cacheinfo", "160000,%s,sub" % sh(repo, "rev-parse", "HEAD"))
+        self.write(repo, "README.md", "words\n")
+        sh(repo, "add", "README.md")
+        sh(repo, "commit", "-q", "-m", "move the submodule and a document", "--no-verify")
+        done = self.pre_push(repo)
+        self.assertNotIn("reused", done.stdout)
+        self.assertEqual(self.ran(repo), "xx")
 
 
 class StatusWording(GateCase):
