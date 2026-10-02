@@ -262,7 +262,7 @@ install writes) or the owner passes `--pre-push`; otherwise it says why it
 skipped it. It is active when git reads `tools/hooks`; an existing one that
 differs is yours and is never replaced, and any hook manager gets a printed
 line to add by hand. A plain `gate` run on a clean tree writes a receipt in
-`.git/themis/gate.json` (tree, command hash, `docs_only` hash, counts) that
+`.git/themis/gate.json` (tree, command hash, `docs_only` hash, settings hash, counts) that
 `--reuse`, `--pre-push` and `status` read. The receipt can be forged by anyone
 with the checkout: it is evidence for a reader and a way to skip a rerun, and
 CI never reads it.
