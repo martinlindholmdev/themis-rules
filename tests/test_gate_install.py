@@ -10,8 +10,10 @@ Never change without a decision: the one-time write of themis-gate.yml and
 the key names install writes into themis.json.
 """
 
+import importlib.util
 import json
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -121,6 +123,30 @@ class WhatInstallWrites(GateInstallCase):
         kept = self.install(repo, command="uninstall")
         self.assertTrue(path.is_file())
         self.assertIn("left", kept.stdout)
+
+
+class AgentFinishSnippet(GateInstallCase):
+    """The printed Codex notify command runs the quick command where no gate has run yet."""
+
+    def notify_argv(self):
+        spec = importlib.util.spec_from_file_location("install_gate", ROOT / "install_gate.py")
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        quick = [sys.executable, "-c", "open('quick-ran', 'w').close()"]
+        line = next(l for l in module.agent_finish_snippets(quick).splitlines() if l.strip().startswith("notify = "))
+        return json.loads(line.split("=", 1)[1])
+
+    @unittest.skipUnless(shutil.which("sh"), "the snippet runs through sh")
+    def test_the_quick_command_runs_in_a_fresh_clone_and_a_linked_worktree(self):
+        repo = self.repo()
+        linked = repo.parent / "linked"
+        self.git(repo, "worktree", "add", "-q", str(linked))
+        for where in (repo, linked):
+            done = subprocess.run(self.notify_argv(), cwd=str(where), capture_output=True, text=True)
+            self.assertEqual(done.returncode, 0, done.stdout + done.stderr)
+            self.assertTrue((where / "quick-ran").exists(), where)
+            log = self.git(where, "rev-parse", "--git-path", "themis/quick.log").stdout.strip()
+            self.assertTrue((where / log).exists(), where)
 
 
 class OwnerSetupSurvives(GateInstallCase):

@@ -207,7 +207,8 @@ def agent_finish_snippets(quick: List[str]) -> str:
     claude = {"hooks": {"Stop": [{"hooks": [{"type": "command", "command":
               'grep -q \'"stop_hook_active": *true\' && exit 0; cd "$CLAUDE_PROJECT_DIR" && %s 1>&2 || exit 2'
               % command}]}]}}
-    codex = 'notify = %s' % json.dumps(["sh", "-c", "%s >> .git/themis/quick.log 2>&1" % command, "themis"])
+    log = 'd=$(git rev-parse --git-path themis) && mkdir -p "$d" && %s >> "$d/quick.log" 2>&1' % command
+    codex = 'notify = %s' % json.dumps(["sh", "-c", log, "themis"])
     return ("test.quick is set; to run it when an agent finishes a turn, add by hand (nothing was written):\n"
             "  Claude Code, .claude/settings.json (a failure is handed back to the agent):\n    %s\n"
             "  Codex, ~/.codex/config.toml (runs after each turn, reports only):\n    %s"

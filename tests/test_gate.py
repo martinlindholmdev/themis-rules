@@ -325,6 +325,26 @@ class PrePush(GateCase):
         self.assertNotIn("reused", done.stdout)
         self.assertEqual(self.ran(repo), "xx")
 
+    def test_a_raised_floor_is_judged_even_when_the_list_covers_the_config_file(self):
+        repo = self.docs_repo(["*.md", "*.json"])
+        self.set_test(repo, min_tests=4)
+        done = self.pre_push(repo)
+        self.assertEqual(done.returncode, 1, done.stdout + done.stderr)
+        self.assertNotIn("reused", done.stdout)
+        self.assertIn("below the floor of 4", done.stdout)
+
+    def test_a_receipt_written_under_other_settings_is_not_reused(self):
+        repo = self.docs_repo(["*.md"])
+        path = repo / sh(repo, "rev-parse", "--git-path", gate.RECEIPT)
+        receipt = json.loads(path.read_text(encoding="utf-8"))
+        receipt["settings"] = "another-floor"
+        path.write_text(json.dumps(receipt), encoding="utf-8")
+        self.write(repo, "README.md", "words\n")
+        self.commit(repo, "docs")
+        done = self.pre_push(repo)
+        self.assertNotIn("reused", done.stdout)
+        self.assertEqual(self.ran(repo), "xx")
+
     def test_an_unlisted_submodule_update_beside_a_document_runs_the_gate(self):
         repo = self.counting_repo()
         self.set_test(repo, docs_only=["*.md"])

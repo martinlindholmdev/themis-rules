@@ -249,9 +249,12 @@ HEAD^{tree}`. The receipt is reused only when it was written under the same
 command hash and the same `docs_only` list hash, and every changed path is a
 regular file (mode 100644 or 100755, the same on both sides, read from the
 trees themselves) matching a glob. A gitlink, symlink, mode change, an
-unlisted path, a git error or no receipt runs the full gate. The list comes
-from HEAD's committed `themis.json`; editing it changes its hash, so the
-change that edits it is never reused across. CI ignores the list.
+unlisted path, a git error or no receipt runs the full gate. The receipt also
+carries a hash of every setting that affects judgment (command, patterns,
+floor, skip ceiling, timeout, `ignore_paths`, protected branches, the list),
+and a changed hash, or `themis.json` itself among the changed paths, runs the
+full gate, so a raised floor is never skipped past. The list comes from
+HEAD's committed `themis.json`. CI ignores the list.
 
 Install writes the pre-push hook only when no CI runs the gate (no GitHub
 remote, or no workflow running `gate`, counting the `themis-gate.yml` the same
@@ -268,13 +271,23 @@ When an agent finishes. `test.quick` is an optional argv list, a fast subset of
 the tests the owner names by hand in `themis.json`; nothing runs it unasked.
 When it is set, install prints two snippets and writes neither: a Claude Code
 `Stop` hook for `.claude/settings.json`, which hands a failure back to the
-agent once (Anthropic's hooks guide: a `Stop` hook that exits 2 blocks the
-stop and shows its stderr to the agent; `stop_hook_active` marks a second
-stop, which is let through), and a Codex `notify` command for
+agent (a `Stop` hook that exits 2 blocks the stop and shows its stderr to the
+agent; `stop_hook_active` is true when the agent is already continuing because
+of a `Stop` hook, and the snippet lets that stop through; Claude Code also caps
+consecutive continuations at 8, `CLAUDE_CODE_STOP_HOOK_BLOCK_CAP`; see
+https://code.claude.com/docs/en/hooks), and a Codex `notify` command for
 `~/.codex/config.toml`, which runs after each turn and appends the output to
-`.git/themis/quick.log` (OpenAI's Codex configuration guide: `notify` runs a
-program when a turn ends and cannot block it). The quick command is never the
-gate and proves nothing about a commit.
+`themis/quick.log` under the directory `git rev-parse --git-path themis` names,
+creating it first, so it works in a fresh clone and a linked worktree
+(OpenAI's Codex configuration guide: `notify` runs a program when a turn ends
+and cannot block it). In a worktree, `$CLAUDE_PROJECT_DIR` stays at the
+directory the session started in while the hook input's `cwd` follows the
+agent, so the `Stop` snippet runs the quick command in the session's
+directory. To block in Codex, use its `Stop` hook (`hooks.json` or `[hooks]` in
+`config.toml`; exit 2 with a message on stderr continues the turn; hooks must
+be trusted through `/hooks`; see https://developers.openai.com/codex/hooks.md);
+Themis has not tested that. The quick command is never the gate and proves
+nothing about a commit.
 
 Not covered: edits to the tests themselves, `pytest.ini`, `conftest.py`, skip
 markers, discovery or coverage exclusions and the workflows (only the command,

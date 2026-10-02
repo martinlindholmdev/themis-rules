@@ -200,3 +200,8 @@ there. `tools/themis.py` and `install.py` never raise this file, and
   Claude Code `Stop` hook and a Codex `notify` line that run it when an agent
   finishes, and adds no install flag for it, because agent configuration
   belongs to the owner.
+- A receipt carries a hash of every setting that affects judgment (command,
+  patterns, floor, skip ceiling, timeout, `ignore_paths`, protected branches,
+  the `docs_only` list), and a documents-only reuse needs the same hash and
+  no change to `themis.json` itself, because a broad list such as `*.json`
+  could otherwise let a raised floor pass on the old counts.

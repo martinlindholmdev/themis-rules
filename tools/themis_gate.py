@@ -18,8 +18,9 @@ merged and ANSI codes stripped before the output is read; a missing count is
 a failure, never a zero; a pass names the commit and tree it covers; the
 local receipt in .git is evidence for a reader and a skip-the-rerun cache,
 never read by CI; --pre-push gates only a push to a protected branch and
-reuses the receipt across a documents-only change; writes only that receipt, themis.json under --record and
---lower, and the decision log under --lower.
+reuses the receipt across a documents-only change that leaves themis.json and
+every judged setting as the receipt saw them; writes only that receipt,
+themis.json under --record and --lower, and the decision log under --lower.
 Never change without a decision: the themis.json "test" key names and their
 meaning, the runner presets, the PASS line, and the rule that the base
 commit's settings and the committed tree decide.
@@ -293,9 +294,18 @@ def judge(cfg: GateConfig, output: str, status: Optional[int],
     return ran, skipped, problems
 
 
-def command_hash(command: Optional[List[str]]) -> str:
-    """A short hash of a list of strings: the test command or the docs_only globs."""
+def command_hash(command: Optional[list]) -> str:
+    """A short hash of a list: the test command, the docs_only globs or the settings."""
     return hashlib.sha256(json.dumps(command).encode("utf-8")).hexdigest()[:12]
+
+
+def settings_hash(cfg: "GateConfig") -> str:
+    """A short hash of every setting that changes what the gate judges: the
+    command, both patterns, floor, skip ceiling, timeout, ignore_paths,
+    protected branches and the docs_only list. test.quick is left out, since
+    the gate never runs it."""
+    return command_hash([cfg.command, cfg.count.pattern, cfg.skip.pattern if cfg.skip else None,
+                         cfg.min_tests, cfg.max_skipped, cfg.timeout, cfg.ignore, cfg.branches, cfg.docs_only])
 
 
 class Ran(NamedTuple):
@@ -406,13 +416,15 @@ def _modes(root: Path, tree: str) -> dict:
 
 
 def _docs_only_receipt(root: Path, cfg: GateConfig) -> Optional[dict]:
-    """The receipt, when it was written under this command and this docs_only
-    list and every path changed since its tree is a regular file, of the same
-    mode on both sides, matching a docs_only glob. A gitlink, symlink, mode
-    change or any git error means no reuse."""
+    """The receipt, when it was written under these settings (the command and
+    docs_only list included) and every path changed since its tree is a
+    regular file, of the same mode on both sides, matching a docs_only glob
+    and not themis.json. A gitlink, symlink, mode change or any git error
+    means no reuse."""
     receipt = read_receipt(root)
     if (not cfg.docs_only or not receipt or receipt.get("command") != command_hash(cfg.command)
-            or receipt.get("docs_only") != command_hash(cfg.docs_only)):
+            or receipt.get("docs_only") != command_hash(cfg.docs_only)
+            or receipt.get("settings") != settings_hash(cfg)):
         return None
     old = receipt.get("tree")
     if not isinstance(old, str) or not re.fullmatch(r"[0-9a-f]{40}|[0-9a-f]{64}", old):
@@ -426,6 +438,8 @@ def _docs_only_receipt(root: Path, cfg: GateConfig) -> Optional[dict]:
     if len(fields) % 2:
         return None
     for path in fields[1::2]:
+        if path == CONFIG_NAME:
+            return None
         modes = {before.get(path), after.get(path)} - {None}
         if len(modes) != 1 or not modes <= {"100644", "100755"}:
             return None
@@ -506,7 +520,8 @@ def execute(root: Path, cfg_rev: str, target: str, local: bool, reuse: bool,
     print(_pass_line(commit, tree, cfg, ran, skipped))
     if local:
         write_receipt(root, {"commit": commit, "tree": tree, "command": command_hash(cfg.command),
-                             "docs_only": command_hash(cfg.docs_only), "tests": ran, "skipped": skipped})
+                             "docs_only": command_hash(cfg.docs_only), "settings": settings_hash(cfg),
+                             "tests": ran, "skipped": skipped})
     return 0, cfg, ran
 
 
