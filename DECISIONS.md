@@ -156,3 +156,8 @@ there. `tools/themis.py` and `install.py` never raise this file, and
   reports xfailed without running the body and nothing in the summary
   distinguishes it. unittest's expected failures and cargo's `should_panic`
   tests run their bodies, so they still count as run.
+- Themis gates its own changes: `themis.json` sets the acceptance gate's
+  command to `python3 -m unittest discover -s tests`, with the floor at the
+  181 tests the first green run counted, so its own status no longer reports
+  honour-system tests. The gate workflow is the unmodified template, because
+  the suite needs only the Python standard library.
