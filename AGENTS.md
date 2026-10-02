@@ -16,7 +16,7 @@ Layout:
   Run only in this repository, never vendored.
 - `tests/`: the test suite.
 
-<!-- themis v3.2 begin -->
+<!-- themis v3.3 begin -->
 # Agent rules
 
 Agents write this code; the owner reads results, not code. [check] marks
@@ -27,8 +27,11 @@ Shape
 1. [check] No file over 800 lines, no function over 100. Baseline sizes
    may shrink, never grow (`rebaseline` only lowers them). Over the limit:
    split the code. Never raise a limit.
-2. Every source file opens with a header under 30 lines: Purpose, Entry
-   points, Invariants, Never change without a decision. Present tense.
+2. [check] Every source file opens with a header under 30 lines: Purpose,
+   Entry points, Invariants, Never change without a decision. Present
+   tense. Checked on new files only: the opening comment or docstring
+   holds those four labels, each followed by a colon and real text, in
+   under 30 lines. Whether it is true and present tense is not checked.
 3. [check] Comments say what the code does now and why. No dates, "used
    to", bug numbers, reviewer, session or model names. History goes in
    the decision log, one line per decision.
@@ -43,7 +46,8 @@ Shape
    updated. Before bulk deletion, plant small bugs; keep what catches
    them, and delete only what a read shows is a true duplicate:
    catching the same bug is not proof. A planted bug nothing catches
-   is a missing test.
+   is a missing test, unless a read shows the change cannot alter what
+   the owner would notice.
 8. Past 25 source files, one code map under 40 lines, held to the tree by
    a test. Shrink one module at a time; run the tests between batches.
 9. A scheduled or long-running job ends with one log line giving its duration.
@@ -70,7 +74,7 @@ Work
     never saw this conversation.
 
 Start with `python3 tools/themis.py status`: it lists what is on.
-<!-- themis v3.2 end -->
+<!-- themis v3.3 end -->
 
 ## Standing permissions
 - New libraries without asking: no
