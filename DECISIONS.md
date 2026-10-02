@@ -90,3 +90,7 @@ there. `tools/themis.py` and `install.py` never raise this file, and
   bugs no test caught found 11 missing tests across two packages. No other
   rule changed; this is release v3.2, and installs of v3 and v3.1 are
   offered the upgrade.
+- The owner gave the maintaining agent a standing mandate to research,
+  test, debug and improve Themis and to add features, releasing after a
+  review by a model from a different family. Changing what a rule means
+  still needs the owner's word.
