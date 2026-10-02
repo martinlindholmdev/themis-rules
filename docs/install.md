@@ -4,8 +4,8 @@ Run inside the target repository:
 
 ```
 THEMIS_SRC=$(mktemp -d)
-git clone --depth 1 --branch v3.2 https://github.com/martinlindholmdev/themis-rules "$THEMIS_SRC"
-git -C "$THEMIS_SRC" describe --tags --exact-match  # must print v3.2
+git clone --depth 1 --branch v3.3 https://github.com/martinlindholmdev/themis-rules "$THEMIS_SRC"
+git -C "$THEMIS_SRC" describe --tags --exact-match  # must print v3.3
 python3 "$THEMIS_SRC/install.py" install
 ```
 
@@ -34,9 +34,11 @@ Pass `--agents aider` if the owner uses Aider but the repository shows no
 sign of it yet: without the `.aider.conf.yml` that flag creates, Aider's
 auto-commit skips every hook.
 
-Re-running `install` is safe. An install over v3 or v3.1 is an upgrade: the plan says so, writes the
-checker files that differ, and seeds the baseline's `lang` section from HEAD's
-committed content. A repository already on v3.2 prints "nothing to
+Re-running `install` is safe. An install over v3, v3.1 or v3.2 is an upgrade: the plan says so, writes the
+checker files that differ, adds `header_exempt_prefixes` to `themis.json`
+(every other setting stays), and seeds the baseline's `lang` section from HEAD's
+committed content. Files that already exist are not held to rule 2's header.
+A repository already on v3.3 prints "nothing to
 change" and writes nothing.
 
 ## Consent

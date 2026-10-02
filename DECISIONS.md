@@ -96,3 +96,18 @@ there. `tools/themis.py` and `install.py` never raise this file, and
   release at a time from real use and from periodic research into what
   frontier labs and other harnesses do; each new check is validated against
   that research before it is built.
+- Rule 2's header is now checked, on new files only: a source file added
+  relative to the run's base (staged against HEAD, A...B for CI, working
+  tree plus untracked for plain `check`) must open with a comment or
+  docstring of at most 29 lines holding Purpose, Entry points, Invariants
+  and Never change without a decision, each with a colon and real text. New
+  test files were added with a one-line docstring and nothing flagged it.
+  Old files are never forced, so there is no baseline; the base commit's own
+  `themis.json` decides, a new owner key `header_exempt_prefixes` skips a
+  prefix, and the check is skipped with a note when the base has no config.
+  It proves shape, not truth. Rule 7's last sentence now ends "unless a read
+  shows the change cannot alter what the owner would notice": some planted
+  bugs are equivalent changes (another check always stops them first, or
+  the input cannot occur), and a test for one checks nothing; the read must
+  name the exact place that makes it so. This is release v3.3, and installs
+  of v3, v3.1 and v3.2 are offered the upgrade.

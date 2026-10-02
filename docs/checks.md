@@ -80,6 +80,53 @@ always, never, also or once), as "used to be", or as "didn't use to", and
 not after is, are, be, been, being, get or gets. "previously" does not count
 directly before a past participle. `themis.json` can add words.
 
+## File header (rule 2)
+
+A source file added by a change must open with a header: a comment or
+docstring (in Python, the real module docstring) in the file's initial
+non-code region, which starts after a shebang, an encoding line, a PHP
+`<?php` tag and blank lines and ends at the first line of code. The header
+holds the four labels `Purpose`, `Entry points` (or `Entry point`),
+`Invariants` and `Never change without a decision`. Each label starts a line,
+in any letter case, and is followed by a colon and real text: a word of three
+or more letters, not led by TODO, TBD or TBA. The order is free and the
+header is at most 29 physical lines. A licence comment in its own block
+before it is ignored; some one block must qualify. A string that looks like
+a comment never counts, because the region ends at the first code.
+
+Comment forms read: a Python docstring or `#` lines; `#` lines for shell,
+Ruby and Perl; `--` lines for Lua and SQL (and `/* */` for SQL); `//`, `///`,
+`//!` and `/* */` for Rust, Go, Swift, Kotlin, Java, C#, JS/TS, C, C++,
+Objective-C and PHP. Lua `--[[ ]]` blocks are not read; use `--` lines. Not
+checked: YAML, JSON and other data, extensions with no comment syntax
+(including `extra_extensions`), and a file with no non-blank line.
+
+A refusal is one line: it names the file and what is missing, over 29 lines,
+or empty or placeholder, and never repeats text from the file.
+
+What is new is decided against the base of the run: staged additions against
+HEAD for the hook, files added between A and B for `--range A...B`, and for
+plain `check` the files added in the working tree relative to HEAD plus
+untracked files. Git's rename detection (`-M`) keeps a renamed file from
+counting as new; a rename rewritten past what git still calls a rename counts
+as new, and so does an unstaged `mv` in plain `check`. A file already in the
+base is never checked, so no baseline entry is needed or possible.
+
+The config is the base's own `themis.json`, so editing it in the same change
+has no effect. When there is no base commit, or the base has no
+`themis.json` (the installing commit, a new branch whose CI base is git's
+empty tree), the check is skipped with one note. A generated-code marker on
+a new file is not honoured here either. `status`, `rebaseline` and `install`
+never run the check.
+
+The check proves shape, not truth. Whether the header is accurate and in the
+present tense stays with the reviewer. Enforcement is additions relative to
+each run's base, not a lasting guarantee that every file made after install
+complies: a file committed empty and filled later, a heavily edited rename
+git still reports as one, and a base with no config are not caught, and
+`Invariants: none.` passes. The generated CI workflow runs the base commit's
+own checker, so a base older than v3.3 does not enforce it.
+
 ## Secrets
 
 A staged line is refused when it matches a private key block, a
@@ -97,6 +144,10 @@ after it is committed. Fields:
 
 - `exempt_prefixes`: path prefixes excluded from measuring, such as test
   fixtures.
+- `header_exempt_prefixes`: path prefixes whose new files skip only the
+  header check, such as imported or generated code; `[""]` turns the check
+  off. It is owner configuration and takes effect once committed at the
+  base. `exempt_prefixes` and `exempt_files` also skip it.
 - `exempt_files`: `{"path": "reason"}`; exact paths excluded from the size,
   function and history checks. The secret scan still reads them. `status`
   lists each with its reason.
@@ -128,7 +179,7 @@ Re-running `install` on a current repository does not touch the baseline.
 
 Three standard-library Python files are copied into the repository:
 `tools/themis.py` (git, configuration, reporting), `tools/themis_lang.py`
-(function length, comments and history matching for the seven languages) and
+(function length, comments and history matching for the seven languages, and the header reader) and
 `tools/themis_scan.py` (the scanner). They must sit side by side; a missing
 one ends the run with one line. The 800-line limit applies to the checker
 itself, which is why it is three files. The three
