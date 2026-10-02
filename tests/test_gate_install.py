@@ -69,7 +69,13 @@ class WhatInstallWrites(GateInstallCase):
         gate_ci = (repo / GATE_YML).read_text(encoding="utf-8")
         self.assertIn("name: themis-gate", gate_ci)
         self.assertIn('themis.py" gate --range', gate_ci)
-        self.assertTrue((repo / "tools/hooks/pre-push").stat().st_mode & 0o100)
+        hook = repo / "tools/hooks/pre-push"
+        if sys.platform == "win32":
+            # Windows file systems have no executable bit and Git for Windows
+            # runs a hook through its shebang line, so that is what must hold.
+            self.assertTrue(hook.read_text(encoding="utf-8").startswith("#!"))
+        else:
+            self.assertTrue(hook.stat().st_mode & 0o100)
         self.assertEqual(self.git(repo, "config", "core.hooksPath").stdout.strip(), "tools/hooks")
         self.assertIn("gate --record", done.stdout)
 

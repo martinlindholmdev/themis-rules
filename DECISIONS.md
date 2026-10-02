@@ -166,3 +166,10 @@ there. `tools/themis.py` and `install.py` never raise this file, and
   checked-out tree and `git push origin other` would otherwise publish an
   untested commit; install still never replaces an edited hook, so an owner
   with the older template refreshes it by hand (docs/install.md).
+- The suite passes on Windows without weaker checks: the pre-push hook's
+  executable bit is asserted on POSIX and, where file systems carry none, the
+  hook is asserted to start with a shebang line, which is how Git for Windows
+  runs it; the linear-time scanner tests compare the cost of a small and a
+  large input (a ratio between the linear and quadratic expectation, best of
+  three runs) instead of absolute seconds, so a slow shared runner cannot fail
+  them and a quadratic scanner still does.
