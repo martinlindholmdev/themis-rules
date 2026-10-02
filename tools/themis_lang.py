@@ -665,6 +665,7 @@ def lang_violations(old_text: str, new_text: str, base_measure) -> List[str]:
 # ---- the file header (rule 2) ------------------------------------------------
 HEADER_LABELS = ("Purpose", "Entry points", "Invariants", "Never change without a decision")
 HEADER_MAX_LINES = 29
+_NESTING = (".rs", ".swift", ".kt", ".kts")
 _LABEL = re.compile(r"\s*\**\s*(purpose|entry\s+points?|invariants|never\s+change\s+without\s+a\s+decision)"
                     r"\s*:(.*)", re.IGNORECASE)
 _PLACEHOLDER = re.compile(r"\W*(?:todo|tbd|tba)\b", re.IGNORECASE)
@@ -720,7 +721,7 @@ def header_problem(text: str, ext: str, style: Tuple[Optional[str], Optional[Tup
     text = text.lstrip("\ufeff")
     if not text.strip():
         return None
-    blocks = leading_blocks(text, style, php=ext == ".php")
+    blocks = leading_blocks(text, style, php=ext == ".php", nested=ext in _NESTING)
     if style[2] == "python":
         doc = _docstring(text)
         blocks += [doc] if doc else []

@@ -97,7 +97,9 @@ a comment never counts, because the region ends at the first code.
 Comment forms read: a Python docstring or `#` lines; `#` lines for shell,
 Ruby and Perl; `--` lines for Lua and SQL (and `/* */` for SQL); `//`, `///`,
 `//!` and `/* */` for Rust, Go, Swift, Kotlin, Java, C#, JS/TS, C, C++,
-Objective-C and PHP. Lua `--[[ ]]` blocks are not read; use `--` lines. Not
+Objective-C and PHP. Block comments nest in Rust, Swift and Kotlin, and a
+comment that starts after another one's closer on the same line is read as
+the next block. Lua `--[[ ]]` blocks are not read; use `--` lines. Not
 checked: YAML, JSON and other data, extensions with no comment syntax
 (including `extra_extensions`), and a file with no non-blank line.
 

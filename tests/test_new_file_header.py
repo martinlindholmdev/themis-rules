@@ -80,6 +80,16 @@ class ShapeTests(unittest.TestCase):
             ("# lines in a shell script", ".sh", "#!/bin/sh\n" + comments("#", FIELDS), True),
             ("a PHP opening tag then a block", ".php", "<?php\n" + block(FIELDS), True),
             ("a PHP block without an opening tag", ".php", block(FIELDS), True),
+            ("a Rust licence with a nested comment, then a header", ".rs",
+             "/* licence\n/* nested note */\nstill licence\n*/\n" + block(FIELDS), True),
+            ("the same licence in C, where nesting does not exist", ".c",
+             "/* licence\n/* nested note */\nstill licence\n*/\n" + block(FIELDS), False),
+            ("a header after a licence closer on the same line", ".c",
+             "/* MIT licence */ /*\n" + "\n".join(FIELDS) + "\n*/\nint x;\n", True),
+            ("a // header after a licence closer on the same line", ".go",
+             "/* MIT licence */ // " + FIELDS[0] + "\n" + comments("//", FIELDS[1:]), True),
+            ("code after a block's closer", ".c",
+             "/* MIT licence */ int y;\n" + block(FIELDS), False),
             ("a string literal that looks like a header", ".js",
              'const s = "// Purpose: guard the door.";\n' + comments("//", FIELDS[1:]), False),
             ("a header after a licence block", ".rs", "// MIT licence text\n\n" + comments("//", FIELDS), True),
@@ -93,7 +103,8 @@ class ShapeTests(unittest.TestCase):
         for name, ext, make, lines in (
                 ("docstring", ".py", lambda n: doc(FIELDS + filler * n), 24),
                 ("// run", ".go", lambda n: comments("//", FIELDS + filler * n), 25),
-                ("/* */ block", ".c", lambda n: block(FIELDS + filler * n), 23)):
+                ("/* */ block", ".c", lambda n: block(FIELDS + filler * n), 23),
+                ("nested /* */ block", ".rs", lambda n: block(FIELDS + ["/* nested note */"] + filler * n), 22)):
             with self.subTest(name):
                 self.assertIsNone(problem(make(lines), ext))
                 self.assertIn("limit is 29", problem(make(lines + 1), ext))

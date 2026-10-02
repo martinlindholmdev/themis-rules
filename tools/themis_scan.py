@@ -414,15 +414,26 @@ def python_comments(text: str) -> Dict[int, str]:
 _COOKIE = re.compile(r"[ \t\f]*#.*?coding[:=][ \t]*[-\w.]+")
 
 
-def _block_comment(lines: List[str], i: int, text: str, closer: str) -> Tuple[List[str], str, int]:
+def _block_comment(lines: List[str], i: int, text: str, block: Tuple[str, str],
+                   nested: bool) -> Tuple[List[str], str, int]:
     """(text per line, what follows the closer, next line) of the block
-    comment that starts at line i with `text` after its opener."""
+    comment that starts at line i with `text` after its opener; with
+    `nested`, inner openers must be closed too."""
+    opener, closer = block
     out: List[str] = []
+    depth = 1
     while True:
-        end = text.find(closer)
-        if end != -1:
-            out.append(text[:end].lstrip("*!"))
-            return out, text[end + len(closer):], i + 1
+        j = 0
+        while j < len(text):
+            if nested and text.startswith(opener, j):
+                depth, j = depth + 1, j + len(opener)
+            elif text.startswith(closer, j):
+                depth, j = depth - 1, j + len(closer)
+                if depth == 0:
+                    out.append(text[:j - len(closer)].lstrip("*!"))
+                    return out, text[j:], i + 1
+            else:
+                j += 1
         out.append(text.lstrip("*!"))
         i += 1
         if i >= len(lines):
@@ -431,45 +442,49 @@ def _block_comment(lines: List[str], i: int, text: str, closer: str) -> Tuple[Li
 
 
 def leading_blocks(text: str, style: Tuple[Optional[str], Optional[Tuple[str, str]], object],
-                   php: bool = False) -> List[Tuple[int, List[str]]]:
+                   php: bool = False, nested: bool = False) -> List[Tuple[int, List[str]]]:
     """(physical lines, text per line with the comment marks removed) for
     each comment block in the file's initial non-code region: after a
     shebang, an encoding cookie, a PHP opening tag and blank lines, and up
     to the first line of code. A block is a run of consecutive line comments
-    or one block comment; a blank line ends a run."""
+    or one block comment (nested ones counted whole when `nested`); a blank
+    line ends a run, and what follows a block's closer on its line is read
+    as the start of the next comment, or ends the region if it is code."""
     prefix, block, _ = style
     lines = text.lstrip("\ufeff").splitlines()
     out: List[Tuple[int, List[str]]] = []
     run: List[str] = []
-    tag, i = php, 0
-    while i < len(lines):
-        s = lines[i].strip()
-        if (i == 0 and s.startswith("#!")) or (i < 2 and prefix == "#" and _COOKIE.match(lines[i])):
-            i += 1
-            continue
-        if tag and s:
-            tag = False
-            s = s[5:].strip() if s.startswith("<?php") else s
+    tag, i, rest = php, 0, ""
+    while i < len(lines) or rest:
+        fresh = not rest
+        if fresh:
+            s = lines[i].strip()
+            if (i == 0 and s.startswith("#!")) or (i < 2 and prefix == "#" and _COOKIE.match(lines[i])):
+                i += 1
+                continue
+            if tag and s:
+                tag = False
+                s = s[5:].strip() if s.startswith("<?php") else s
+        else:
+            s, rest = rest.strip(), ""
         if not s:
             if run:
                 out.append((len(run), run))
                 run = []
-            i += 1
         elif prefix and s.startswith(prefix):
             body = s[len(prefix):]
             run.append(body[1:] if prefix == "//" and body[:1] in ("/", "!") else body)
-            i += 1
         elif block and s.startswith(block[0]):
             if run:
                 out.append((len(run), run))
                 run = []
-            first = i
-            body, rest, i = _block_comment(lines, i, s[len(block[0]):], block[1])
+            first = i if fresh else i - 1
+            body, rest, i = _block_comment(lines, first, s[len(block[0]):], block, nested)
             out.append((i - first, body))
-            if rest.strip():
-                return out
+            continue
         else:
             break
+        i += 1 if fresh else 0
     if run:
         out.append((len(run), run))
     return out
