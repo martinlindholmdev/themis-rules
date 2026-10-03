@@ -211,3 +211,8 @@ there. `tools/themis.py` and `install.py` never raise this file, and
   edit its own gate. A branch update whose current commit this clone lacks is
   refused with a request to fetch, before protection is decided; a stale
   remote-tracking ref never stands in for it.
+- v3.5.2: a `functions` baseline entry may move with a Python function moved
+  unchanged to another file in the same change, so a file can be split
+  without rewriting its long functions; the text must match exactly (common
+  indentation and trailing whitespace aside), the old file must no longer
+  define it, and each old entry pays once. `lang` entries do not move.

@@ -277,14 +277,14 @@ class UpgradeTests(unittest.TestCase):
             old = {"version": "v3.2", "decision_log": "DECISIONS.md", "exempt_prefixes": ["vendor/"],
                    "limits": {".ts": {"file": 500}}, "header_exempt_prefixes": ["gen/"]}
             repo.write("themis.json", json.dumps(old))
-            rules = (ROOT / "RULES.md").read_text(encoding="utf-8").replace("v3.5.1", "v3.2")
+            rules = (ROOT / "RULES.md").read_text(encoding="utf-8").replace("v3.5.2", "v3.2")
             repo.write("AGENTS.md", rules)
             repo.commit("a v3.2 install")
             done = subprocess.run([sys.executable, str(INSTALL), "install", "--defaults", "--yes"],
                                   cwd=str(repo.path), capture_output=True, text=True)
             self.assertEqual(done.returncode, 0, done.stdout + done.stderr)
             config = json.loads((repo.path / "themis.json").read_text(encoding="utf-8"))
-            self.assertEqual(config["version"], "v3.5.1")
+            self.assertEqual(config["version"], "v3.5.2")
             for key in ("exempt_prefixes", "limits", "header_exempt_prefixes"):
                 self.assertEqual(config[key], old[key])
             repo.commit("upgrade")

@@ -14,6 +14,20 @@ recorded numbers and drops entries for files that shrank under a limit or
 were deleted; it refuses, writing nothing, to raise a number. The hook and
 the CI range check refuse a commit that raises the baseline.
 
+Splitting a file may move a long Python function to another file. The change
+may then carry that function's `functions` entry from the old path to the new
+one, at the same size or lower, and the hook and range check accept it only
+when all of these hold: the old path's entry is gone from the new baseline;
+the function's text at the new path equals its text at the old path in the
+base commit, ignoring only the block's common leading indentation and
+trailing whitespace on each line (comments, strings and relative indentation
+must match exactly); and the old file no longer defines a function of that
+name (an import that re-exports it is fine, a forwarding wrapper is not).
+Each old entry pays for one new entry. Anything else, including a read or
+parse error, is reported as a new entry. `files` and `history_words` entries
+never move, `rebaseline` never creates a move, and `lang` entries (the seven
+brace languages) do not move: those functions are split in place.
+
 ## Function measurement
 
 Function length is measured for Python and for Rust, Go, Swift, Kotlin,

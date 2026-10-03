@@ -4,8 +4,8 @@ Run inside the target repository:
 
 ```
 THEMIS_SRC=$(mktemp -d)
-git clone --depth 1 --branch v3.5.1 https://github.com/martinlindholmdev/themis-rules "$THEMIS_SRC"
-git -C "$THEMIS_SRC" describe --tags --exact-match  # must print v3.5.1
+git clone --depth 1 --branch v3.5.2 https://github.com/martinlindholmdev/themis-rules "$THEMIS_SRC"
+git -C "$THEMIS_SRC" describe --tags --exact-match  # must print v3.5.2
 python3 "$THEMIS_SRC/install.py" install
 ```
 
@@ -67,7 +67,7 @@ checker files that differ (v3.4 added `tools/themis_gate.py`), replaces
 `themis.json` (every other setting stays), and seeds the baseline's `lang`
 section from HEAD's committed content. Files that already exist are not held
 to rule 2's header. An upgrade never seeds a `test` key unasked. A repository
-already on v3.5.1 prints "nothing to change" and writes nothing.
+already on v3.5.2 prints "nothing to change" and writes nothing.
 
 ### Upgrading from v3.4
 

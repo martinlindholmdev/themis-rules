@@ -6,7 +6,7 @@
  "extra_history_words": [],
  "extra_extensions": [],
  "decision_log": "DECISIONS.md",
- "version": "v3.5.1",
+ "version": "v3.5.2",
  "header_exempt_prefixes": [],
  "test": {
   "command": [

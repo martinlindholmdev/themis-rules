@@ -39,10 +39,11 @@ import re
 import importlib.util
 import subprocess
 import sys
+import textwrap
 from pathlib import Path, PurePosixPath, PureWindowsPath
-from typing import Dict, List, Optional, Tuple
+from typing import Callable, Dict, List, Optional, Tuple
 
-SCRIPT_VERSION = "v3.5.1"
+SCRIPT_VERSION = "v3.5.2"
 
 FILE_MAX_LINES = 800
 FUNCTION_MAX_LINES = 100
@@ -233,13 +234,10 @@ class Measure:
     def is_lang(self) -> bool:
         return Path(self.path).suffix in lang.EXTENSIONS
 
-def python_functions(text: str) -> Tuple[Dict[str, int], Optional[str]]:
-    try:
-        tree = ast.parse(text)
-    except SyntaxError as exc:
-        return {}, "python3 %d.%d cannot parse it (%s)" % (sys.version_info[0], sys.version_info[1], exc.msg)
+def _python_defs(tree: ast.AST) -> Dict[str, ast.AST]:
+    """Every function node, keyed as the baseline keys it: Type.method, #n for repeats."""
     seen: Dict[str, int] = {}
-    sizes: Dict[str, int] = {}
+    defs: Dict[str, ast.AST] = {}
 
     def visit(node: ast.AST, prefix: str) -> None:
         for child in ast.iter_child_nodes(node):
@@ -248,7 +246,7 @@ def python_functions(text: str) -> Tuple[Dict[str, int], Optional[str]]:
                 key = prefix + child.name
                 if seen[child.name] > 1:
                     key += "#%d" % seen[child.name]
-                sizes[key] = child.end_lineno - child.lineno + 1
+                defs[key] = child
                 visit(child, key + ".")
             elif isinstance(child, ast.ClassDef):
                 visit(child, prefix + child.name + ".")
@@ -256,7 +254,39 @@ def python_functions(text: str) -> Tuple[Dict[str, int], Optional[str]]:
                 visit(child, prefix)
 
     visit(tree, "")
-    return sizes, None
+    return defs
+
+def python_functions(text: str) -> Tuple[Dict[str, int], Optional[str]]:
+    try:
+        tree = ast.parse(text)
+    except SyntaxError as exc:
+        return {}, "python3 %d.%d cannot parse it (%s)" % (sys.version_info[0], sys.version_info[1], exc.msg)
+    return {key: node.end_lineno - node.lineno + 1 for key, node in _python_defs(tree).items()}, None
+
+def _function_block(text: str, key: str) -> Optional[str]:
+    """A function's lines, decorators included, with trailing whitespace on
+    each line and the block's common leading indentation removed."""
+    node = _python_defs(ast.parse(text)).get(key)
+    if node is None:
+        return None
+    first = min([node.lineno] + [d.lineno for d in node.decorator_list])
+    lines = re.split(r"\r\n?|\n", text)[first - 1:node.end_lineno]
+    return textwrap.dedent("\n".join(line.rstrip() for line in lines))
+
+def moved_unchanged(root: Path, rev: str, new_ref: str, old_path: str, new_path: str, key: str) -> bool:
+    """True only when function `key` at new_path in new_ref has the same text
+    as at old_path in rev, and old_path in new_ref defines no function of that
+    name (an import that re-exports it is fine). Any read or parse error is False."""
+    try:
+        before = _function_block(read(root, old_path, rev), key)
+        after = _function_block(read(root, new_path, new_ref), key)
+        left = ast.parse(read(root, old_path, new_ref))
+    except (subprocess.CalledProcessError, SyntaxError, ValueError):
+        return False
+    name = key.rsplit(".", 1)[-1].split("#")[0]
+    if any(isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)) and n.name == name for n in ast.walk(left)):
+        return False
+    return before is not None and before == after
 
 def measure_file(path: str, text: str, pattern: "re.Pattern[str]", limits: Optional[dict] = None) -> Measure:
     measure = Measure(path)
@@ -469,9 +499,25 @@ def write_baseline(root: Path, config: dict, data: dict) -> None:
     path = safe_rel_path(root, config["baseline_path"])
     path.write_text(json.dumps(data, indent=1, ensure_ascii=False) + "\n", encoding="utf-8")
 
-def baseline_ratchet_violations(head_text: str, new_text: str) -> List[str]:
+def _paid_by_move(old_functions: dict, new_functions: dict, path: str, name: str, size: int,
+                  moved: Callable[[str, str, str], bool], paid: set) -> bool:
+    """An old entry for `name` under another path, gone from the new baseline,
+    not smaller, not already used, and confirmed by moved(old, new, name)."""
+    for source, funcs in old_functions.items():
+        old_size = funcs.get(name)
+        if (source != path and old_size is not None and size <= old_size and (source, name) not in paid
+                and name not in new_functions.get(source, {}) and moved(source, path, name)):
+            paid.add((source, name))
+            return True
+    return False
+
+def baseline_ratchet_violations(head_text: str, new_text: str,
+                                moved: Optional[Callable[[str, str, str], bool]] = None) -> List[str]:
     """A number that went up, or an entry that is new, is a violation —
-    the baseline only ever goes down. Pure function: no git, easy to test."""
+    the baseline only ever goes down. The one exception: a new `functions`
+    entry that moved(old_path, new_path, name) confirms is the same function
+    moved unchanged, carrying the old path's entry; each old entry pays once.
+    Pure function: no git, easy to test."""
     try:
         head = json.loads(head_text)
     except json.JSONDecodeError:
@@ -489,13 +535,15 @@ def baseline_ratchet_violations(head_text: str, new_text: str) -> List[str]:
                 problems.append("%s.%s: new entry (%s)" % (section, path, value))
             elif isinstance(value, (int, float)) and value > old:
                 problems.append("%s.%s: raised from %s to %s" % (section, path, old, value))
-    old_functions = head.get("functions", {})
-    for path, funcs in new.get("functions", {}).items():
+    old_functions, new_functions = head.get("functions", {}), new.get("functions", {})
+    paid: set = set()
+    for path, funcs in new_functions.items():
         old_funcs = old_functions.get(path, {})
         for name, size in funcs.items():
             old_size = old_funcs.get(name)
             if old_size is None:
-                problems.append("functions %s/%s: new entry (%s)" % (path, name, size))
+                if moved is None or not _paid_by_move(old_functions, new_functions, path, name, size, moved, paid):
+                    problems.append("functions %s/%s: new entry (%s)" % (path, name, size))
             elif size > old_size:
                 problems.append("functions %s/%s: raised from %s to %s" % (path, name, old_size, size))
     return problems
@@ -518,7 +566,8 @@ def baseline_problems(root: Path, config: dict, rev: str, new_ref: str, diff_arg
     new_text = read(root, config["baseline_path"], new_ref)
     try:
         head_text = read(root, config["baseline_path"], rev)
-        violations = baseline_ratchet_violations(head_text, new_text)
+        violations = baseline_ratchet_violations(
+            head_text, new_text, lambda a, b, name: moved_unchanged(root, rev, new_ref, a, b, name))
     except subprocess.CalledProcessError:
         head_text, violations = "{}", []  # nothing committed at rev: this change creates it
     violations += lang_problems(root, config, rev, head_text, new_text)
