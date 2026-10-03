@@ -18,7 +18,7 @@
    "tests"
   ],
   "runner": "unittest",
-  "min_tests": 181,
+  "min_tests": 211,
   "max_skipped": 0
  }
 }
