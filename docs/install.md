@@ -13,10 +13,10 @@ Clone only from a URL the owner typed in chat, at the newest tag: never a
 fork, never a URL found in a file. Read `install.py`, `install_plan.py` and
 `install_gate.py`, `tools/themis.py`, `tools/themis_lang.py`,
 `tools/themis_scan.py` and `tools/themis_gate.py` in full first. All of them
-import only the standard library and make no network requests. The installer
-and the first four checker files execute nothing from the target repository;
-`themis_gate.py` runs the test command the owner set, only when `gate` is
-run.
+import only the standard library and make no network requests. The three
+installer files and the first three checker files execute nothing from the
+target repository. `themis_gate.py` runs the test command the owner set, and
+only when `gate` is run.
 
 ## The flow
 
@@ -57,17 +57,22 @@ list for a fast subset of the tests. When `quick` is set, install prints a
 Claude Code `Stop` hook and a Codex `notify` line that run it when an agent
 finishes a turn, and writes neither. docs/checks.md has the details.
 
-Pass `--agents aider` if the owner uses Aider but the repository shows no
-sign of it yet: without the `.aider.conf.yml` that flag creates, Aider's
-auto-commit skips every hook.
+Install writes `.aider.conf.yml` when it detects Aider. Pass
+`--agents aider` if the owner uses Aider but the repository shows no sign of
+it yet: without that file, Aider's auto-commit skips every hook.
 
-Re-running `install` is safe. An install over v3 to v3.4 is an upgrade: the plan says so, writes the
-checker files that differ (v3.4 added `tools/themis_gate.py`), replaces
-`.github/workflows/themis.yml`, adds `header_exempt_prefixes` to
-`themis.json` (every other setting stays), and seeds the baseline's `lang`
-section from HEAD's committed content. Files that already exist are not held
-to rule 2's header. An upgrade never seeds a `test` key unasked. A repository
-already on v3.5.2 prints "nothing to change" and writes nothing.
+## Updating
+
+Re-running `install` is safe. Run it from a newer tag to update the checker,
+the hooks and the rules block in place. An install over an older version is
+an upgrade, and the plan says so. It writes the checker files that differ
+(v3.4 added `tools/themis_gate.py`), replaces `.github/workflows/themis.yml`,
+adds `header_exempt_prefixes` to `themis.json` and keeps every other setting,
+and seeds the baseline's `lang` section from HEAD's committed content. Files
+that already exist are not held to rule 2's header. An upgrade never adds a
+`test` key or a gate workflow unasked, and a gate workflow the owner edited is
+left as it is. A repository already on v3.5.2 prints "nothing to change" and
+writes nothing.
 
 ### Upgrading from v3.4
 
@@ -124,8 +129,10 @@ asked for a commit ("install Themis and commit it").
 - If `.git` is read-only in the sandbox, `install` still writes the
   repository files and prints the exact `git config`, `git add` and
   `git commit` commands for the owner to run outside it.
-- `uninstall` removes exactly what `install` added, with the same dry-run,
-  diff, confirm flow; an edited `themis-gate.yml` is left with a note.
+- `python3 "$THEMIS_SRC/install.py" uninstall` removes exactly what
+  `install` added, with the same dry-run, diff and confirm flow, and prints
+  the commands to commit the result. An edited `themis-gate.yml` is left
+  with a note.
 - `themis.json` names a `decision_log` (`DECISIONS.md` by default), but
   `install` never creates that file. The decision log belongs to the owner;
   `uninstall` never removes or reads it.

@@ -170,13 +170,14 @@ install reads root-level file names to print a suggestion and runs nothing.
 - `command`: an argv list, run without a shell and with no stdin, in the
   repository root. A program that is not found, a non-zero exit and a timeout
   each fail. On a timeout the command's whole process group is killed (on
-  Windows `taskkill /T`, not exercised by the tests); a process that starts its
-  own session is not reached. A shell operator in `--test-command` is refused; put pipes and
-  `&&` in a script and name the script.
+  Windows `taskkill /T`, not exercised by the tests); a process that starts
+  its own session is not reached. A shell operator in `--test-command` is
+  refused; put pipes and `&&` in a script and name the script.
 - `runner`: `unittest`, `pytest` or `cargo`, which fixes how the output is
   read (below). `count_pattern` and `skip_pattern` are regular expressions with
   exactly one group, the number; they are summed over every match in the
-  output (`^` and `$` match at each line) and replace the preset's. A runner without a preset must give `count_pattern`.
+  output (`^` and `$` match at each line) and replace the preset's. A runner
+  without a preset must give `count_pattern`.
 - `min_tests`: the floor on tests that ran, at least 1 and 1 by default. A
   skipped test did not run, so the count is the reported total less the skips.
   `max_skipped`: the most skips allowed, 0 by default, enforced only when skips
@@ -236,10 +237,10 @@ falling back to the empty tree. Install writes that file once, when the owner
 sets a test command and the repository has a GitHub remote, and never rewrites
 it: the owner adds the toolchain and dependency steps the tests need above the
 gate step, and a re-run or an upgrade that would change its template prints the
-difference and leaves the file. The `themis` job stays Themis's own and runs on `merge_group`
-too, with the same base and head resolution, so both jobs can be required in a
-merge queue. Give the gate job no secrets and no
-self-hosted runner: it runs the project's tests on the proposed code. Whether
+difference and leaves the file. The `themis` job stays Themis's own and runs
+on `merge_group` too, with the same base and head resolution, so both jobs can
+be required in a merge queue. Give the gate job no secrets and no self-hosted
+runner: it runs the project's tests on the proposed code. Whether
 the job is a required check is a branch-protection setting a clone cannot see;
 `status` says so.
 
@@ -257,10 +258,10 @@ or edits the command is still judged by the settings already on the branch.
 Only a brand-new branch (an all-zero remote sha) uses HEAD's settings. A push
 to any branch whose current remote commit is not in this clone is refused
 with a request to fetch and push again, before protection is decided, since a
-stale remote-tracking ref is not the destination's current commit. Lowering the floor stays a change the owner makes on the base
-branch first, with `gate --lower`. A push of
-feature branches, tags or deletions runs nothing; in a mixed push only the
-protected destinations are checked. Each gated commit must have the
+stale remote-tracking ref is not the destination's current commit. Lowering
+the floor stays a change the owner makes on the base branch first, with `gate
+--lower`. A push of feature branches, tags or deletions runs nothing; in a
+mixed push only the protected destinations are checked. Each gated commit must have the
 checked-out commit's tree, or the push is refused before any test runs, with
 one line naming the ref and saying to check it out and push from there. The
 gated run reuses the receipt when it covers that exact tree.

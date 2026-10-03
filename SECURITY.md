@@ -15,7 +15,7 @@ has no release SLA; expect an acknowledgement, not a guaranteed fix date.
   `rebaseline` writes the baseline and can only lower it. `gate` writes a
   receipt under `.git/themis/`; `gate --record` and `gate --lower` write
   `themis.json`, and `--lower` appends a line to the decision log.
-- It scans staged diffs and commit ranges for secret-shaped strings
+- The checker scans staged diffs and commit ranges for secret-shaped strings
   (private keys, provider-shaped API tokens, long credential assignments)
   and refuses the commit. It is a pattern match, not an entropy model or a
   provider lookup: it misses secrets that do not match its patterns and
@@ -46,7 +46,8 @@ has no release SLA; expect an acknowledgement, not a guaranteed fix date.
   and the committed tree must equal the working tree before and after the run.
   The local hook, `tools/hooks/pre-push`, runs project code exactly as the
   owner's own test command would, once git is pointed at `tools/hooks` and a
-  `test` section is committed.
+  `test` section is committed. It runs the tests only for a push that updates
+  a protected branch.
 - `install.py machine` writes a short, read-only instruction (read
   `AGENTS.md`, offer once, never run anything) into up to eight per-user
   agent config files, and only after the owner confirms each file on a TTY.
