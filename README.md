@@ -5,7 +5,7 @@
 <a href="LICENSE"><img src="https://img.shields.io/github/license/martinlindholmdev/themis-rules" alt="License"></a>
 </p>
 
-**Named for the Greek goddess of law and order. Built to keep AI-written code in line.**
+**Named for the Greek goddess of law and order. Built to keep agent-written code in line.**
 
 More agent-written code should not mean more code for you to untangle.
 
