@@ -74,6 +74,7 @@ Mark both jobs as required status checks in the branch protection settings; with
 
 ## Read more
 
+- [docs/why.md](docs/why.md): why each rule exists, with sources.
 - [docs/checks.md](docs/checks.md): what each check measures, its configuration and the baseline.
 - [docs/install.md](docs/install.md): installing, upgrading and uninstalling.
 - [docs/frameworks.md](docs/frameworks.md): support for 17 coding agents.
