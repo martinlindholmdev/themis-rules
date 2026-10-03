@@ -7,9 +7,13 @@
 
 **Named for the Greek goddess of law and order. Built to keep AI-written code in line.**
 
-Themis is a set of repository rules for coding agents, with a small Python checker that enforces part of them. The rules and the checker live in your repository. There is no hosted service and no third-party Python dependency.
+More agent-written code should not mean more code for you to untangle.
 
-A Git hook runs the checker before each commit. An optional CI job runs it again on proposed changes. When the owner sets a test command, a second CI job runs the project's own tests on the committed tree.
+Themis gives coding agents repository rules to keep code small, readable and honest. You read results, not code.
+
+- The rules and a small, stdlib-only Python checker live in your repository: no hosted service, no third-party dependency.
+- A Git hook checks changes before each commit. Optional CI checks them again; make it required so agents cannot quietly skip the enforced checks.
+- Set a test command to enable the optional test gate: a second CI job runs your project's tests on the committed tree and refuses errors, missing test counts, too few tests or too many skips.
 
 A refused commit looks like this:
 
