@@ -59,7 +59,7 @@ Or tell your agent: "Install Themis from github.com/martinlindholmdev/themis-rul
 
 The checker is committed with the repository. Activate the hook in each fresh clone with `git config core.hooksPath tools/hooks`. A repository that uses husky, lefthook or the pre-commit framework uses that tool's own install step instead.
 
-`AGENTS.md` is read natively by most agents, and `install.py` adds what the others need. Aider skips Git hooks by default; install writes an Aider config that turns hook checking on. The supported agents, with sources, are in [docs/frameworks.md](docs/frameworks.md).
+`AGENTS.md` is read natively by most agents, and `install.py` adds what the others need. Aider skips Git hooks by default; when install detects Aider or is given `--agents aider`, it creates an Aider config that turns hook checking on. An existing `.aider.conf.yml` gets those lines added. The supported agents, with sources, are in [docs/frameworks.md](docs/frameworks.md).
 
 ## Daily use
 
