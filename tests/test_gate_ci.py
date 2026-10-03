@@ -169,6 +169,17 @@ class PrePushRealPush(GateCiCase):
         self.assertEqual(mixed.returncode, 0, mixed.stdout + mixed.stderr)
         self.assertIn("gate PASS", mixed.stdout + mixed.stderr)
 
+    def test_a_main_push_that_removes_the_test_section_is_still_gated(self):
+        self.assertEqual(self.git_push("HEAD:refs/heads/main").returncode, 0)
+        config = json.loads((self.repo / "themis.json").read_text(encoding="utf-8"))
+        del config["test"]
+        (self.repo / "themis.json").write_text(json.dumps(config), encoding="utf-8")
+        (self.repo / "test_sample.py").write_text(suite(1), encoding="utf-8")
+        self.commit("drop the gate and the tests")
+        refused = self.git_push("HEAD:refs/heads/main")
+        self.assertNotEqual(refused.returncode, 0)
+        self.assertIn("below the floor of 3", refused.stdout + refused.stderr)
+
     def test_a_delete_only_push_runs_no_gate(self):
         self.assertEqual(self.git_push("HEAD:refs/heads/doomed").returncode, 0)
         deleted = self.git_push("--delete", "doomed")

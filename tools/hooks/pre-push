@@ -6,11 +6,12 @@
 # install writes it when no CI runs the gate, or when asked with --pre-push.
 # Invariants: hands git's ref lines on stdin to `gate --pre-push`, which
 # gates only a ref updating a branch in test.pre_push_branches (default
-# main and master), refuses one whose commit tree differs from the
-# checked-out tree before any test runs, and reuses the last local run when
-# it covers that tree or only docs_only files changed since; a push of
-# other branches or of deletions runs no tests; exit 0 lets the push
-# through, anything else stops it with the gate's message.
+# main and master), judges it by the test settings at the destination's
+# current commit (HEAD's for a new branch), refuses one whose commit tree
+# differs from the checked-out tree before any test runs, and reuses the
+# last local run when it covers that tree or only docs_only files changed
+# since; a push of other branches or of deletions runs no tests; exit 0 lets
+# the push through, anything else stops it with the gate's message.
 # Never change without a decision: which command runs here.
 root=$(git rev-parse --show-toplevel) || exit 1
 py=$(command -v python3 || command -v python) || {

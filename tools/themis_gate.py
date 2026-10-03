@@ -10,8 +10,9 @@ parse_test_config(), runs_gate_in_ci(), status_lines(), git(), hooks_dir(),
 hook_status().
 Invariants: standard library only, python3 3.9+, no network access; the
 command is an argv list run without a shell and with no stdin; its
-settings come from the BASE commit's themis.json (A for --range, HEAD
-otherwise), so a change cannot edit its own gate; the tracked working tree
+settings come from the BASE commit's themis.json (A for --range, the
+destination branch's current commit for --pre-push, HEAD otherwise), so a
+change cannot edit its own gate; the tracked working tree
 and index must equal the tree of the commit being gated before the run and
 again after it, except under the owner's ignore_paths; stdout and stderr are
 merged and ANSI codes stripped before the output is read; a missing count is
@@ -404,7 +405,8 @@ def write_receipt(root: Path, data: dict) -> None:
 def _matching_receipt(root: Path, cfg: GateConfig) -> Optional[dict]:
     tree = _rev(root, "HEAD^{tree}")
     receipt = read_receipt(root)
-    if receipt and tree and receipt.get("tree") == tree and receipt.get("command") == command_hash(cfg.command):
+    if (receipt and tree and receipt.get("tree") == tree and receipt.get("command") == command_hash(cfg.command)
+            and receipt.get("settings") == settings_hash(cfg)):
         return receipt
     return None
 
@@ -525,12 +527,26 @@ def execute(root: Path, cfg_rev: str, target: str, local: bool, reuse: bool,
     return 0, cfg, ran
 
 
-def _branches_at(root: Path, rev: str) -> List[str]:
-    """test.pre_push_branches committed at `rev` (the destination's current
-    commit), or none when that commit is absent here or has no valid list;
-    it widens HEAD's list, so a change cannot unprotect the branch it updates."""
-    if set(rev) == {"0"} or _rev(root, rev + "^{commit}") is None:
+def _destinations(root: Path, remote_ref: str, remote_sha: str) -> List[str]:
+    """The destination branch's current commit as this clone knows it: the
+    pushed-over sha when that object is here, else each remote-tracking ref
+    for that branch with its own test section. None when the branch does not
+    exist on the remote yet (an all-zero sha) or this clone has no trace of it,
+    which the caller refuses rather than guess."""
+    if set(remote_sha) == {"0"}:
         return []
+    if _rev(root, remote_sha + "^{commit}") is not None:
+        return [remote_sha]
+    branch, found = remote_ref[len("refs/heads/"):], {}
+    for line in git(root, "for-each-ref", "--format=%(objectname) %(refname)", "refs/remotes/").splitlines():
+        sha, _, ref = line.partition(" ")
+        if ref.split("/", 3)[3:] == [branch]:
+            found.setdefault(json.dumps(raw_test_at(root, sha)[0], sort_keys=True), sha)
+    return list(found.values())
+
+
+def _branches_at(root: Path, rev: str) -> List[str]:
+    """test.pre_push_branches committed at `rev`, or none when it has no valid list."""
     raw, why = raw_test_at(root, rev)
     cfg, _ = parse_test_config(raw) if why is None else (None, [])
     return cfg.branches if cfg is not None else []
@@ -540,27 +556,51 @@ def pre_push(root: Path, lines: List[str]) -> int:
     """The pre-push hook's gate. Each stdin line is `local-ref local-sha
     remote-ref remote-sha`; only a line updating a protected branch
     (test.pre_push_branches at HEAD or at the destination's current commit)
-    is gated, and each such commit must
-    have the checked-out tree, since that is the tree the gate tests."""
+    is gated, under the test settings at the destination's current commit,
+    or HEAD's when the branch is new, so a push cannot remove, weaken or skip
+    its own gate. Each gated commit must have the checked-out tree, since
+    that is the tree the gate tests."""
     pushes = [p for p in (line.split() for line in lines) if len(p) == 4 and set(p[1]) != {"0"}]
     if not pushes:
         return 0
-    cfg, ended = _load(root, "HEAD")
-    if cfg is None:
-        return ended
-    gated = [p for p in pushes if p[2].startswith("refs/heads/")
-             and p[2][len("refs/heads/"):] in cfg.branches + _branches_at(root, p[3])]
+    raw, why = raw_test_at(root, "HEAD")
+    head_cfg, problems = parse_test_config(raw) if why is None else (None, [])
+    if problems:
+        return _fail(["themis.json at HEAD: %s" % p for p in problems])
+    head_branches = head_cfg.branches if head_cfg is not None else []
+    gated = []
+    for local_ref, local_sha, remote_ref, remote_sha in pushes:
+        dests = _destinations(root, remote_ref, remote_sha) if remote_ref.startswith("refs/heads/") else []
+        protected = head_branches + [b for d in dests for b in _branches_at(root, d)]
+        if not remote_ref.startswith("refs/heads/") or remote_ref[len("refs/heads/"):] not in protected:
+            continue
+        if len(dests) > 1 or (not dests and set(remote_sha) != {"0"}):
+            return _fail(["the current commit of %s is not in this clone, or its remote-tracking refs disagree "
+                          "on the test settings; fetch it, then push again" % _safe(remote_ref)])
+        gated.append((local_ref, local_sha, dests[0] if dests else "HEAD"))
     if not gated:
         print("themis: pre-push: nothing pushed to %s, so no tests run here; CI runs them"
-              % (", ".join(_safe(b) for b in cfg.branches) or "a protected branch"))
+              % (", ".join(_safe(b) for b in head_branches) or "a protected branch"))
         return 0
     head_tree = _rev(root, "HEAD^{tree}")
-    for local_ref, local_sha, _, _ in gated:
+    for local_ref, local_sha, _ in gated:
         if head_tree is None or _rev(root, local_sha + "^{tree}") != head_tree:
             sys.stderr.write("themis: %s is not the checked-out commit, so the gate has not tested it; "
                              "check it out and push from there\n" % _safe(local_ref))
             return 1
-    return execute(root, "HEAD", "HEAD", True, True, cfg)[0]
+    judged = set()
+    for _, _, cfg_rev in gated:
+        cfg, ended = _load(root, cfg_rev)
+        if cfg is None:
+            if ended:
+                return ended
+            continue
+        if settings_hash(cfg) not in judged:
+            judged.add(settings_hash(cfg))
+            status = execute(root, cfg_rev, "HEAD", True, True, cfg)[0]
+            if status:
+                return status
+    return 0
 
 
 # ------------------------------------------------- owner-only changes to the floor

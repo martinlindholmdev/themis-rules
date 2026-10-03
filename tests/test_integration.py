@@ -190,9 +190,9 @@ class UpgradeTests(unittest.TestCase):
             self.assertFalse((repo / "agent-rules.json").exists())
             self.assertTrue((repo / "themis.json").exists())
             agents = (repo / "AGENTS.md").read_text(encoding="utf-8")
-            self.assertIn("<!-- themis v3.5 begin -->", agents)
+            self.assertIn("<!-- themis v3.5.1 begin -->", agents)
             self.assertNotIn("agent-rules v2", agents)
-            commit_all(repo, "upgrade to themis v3.5")
+            commit_all(repo, "upgrade to themis v3.5.1")
 
             again = run(repo, str(INSTALL), "install", "--defaults", "--yes")
             self.assertIn("nothing to change", again.stdout)

@@ -265,8 +265,8 @@ class LocalReceipt(GateCase):
 class PrePush(GateCase):
     """`gate --pre-push` reads the lines git hands a pre-push hook on stdin."""
 
-    def pre_push(self, repo, remote_ref="refs/heads/main"):
-        line = "refs/heads/work %s %s %s\n" % (sh(repo, "rev-parse", "HEAD"), remote_ref, "0" * 40)
+    def pre_push(self, repo, remote_ref="refs/heads/main", remote_sha="0" * 40):
+        line = "refs/heads/work %s %s %s\n" % (sh(repo, "rev-parse", "HEAD"), remote_ref, remote_sha)
         return subprocess.run([sys.executable, str(repo / "tools" / "themis.py"), "gate", "--pre-push"],
                               cwd=str(repo), input=line, capture_output=True, text=True)
 
@@ -359,6 +359,41 @@ class PrePush(GateCase):
         done = self.pre_push(repo)
         self.assertNotIn("reused", done.stdout)
         self.assertEqual(self.ran(repo), "xx")
+
+    def test_a_main_push_that_lowers_the_floor_is_judged_by_the_destinations_floor(self):
+        repo = self.repo()
+        main = sh(repo, "rev-parse", "HEAD")
+        self.write(repo, "test_sample.py", suite(1))
+        self.set_test(repo, min_tests=1)
+        self.assertEqual(self.gate(repo).returncode, 0)
+        done = self.pre_push(repo, remote_sha=main)
+        self.assertEqual(done.returncode, 1, done.stdout + done.stderr)
+        self.assertIn("below the floor of 3", done.stdout)
+
+    def test_a_main_push_that_edits_the_command_runs_the_destinations_command(self):
+        repo = self.counting_repo()
+        main = sh(repo, "rev-parse", "HEAD")
+        self.set_test(repo, command=fake("Ran 9 tests in 0.1s"))
+        done = self.pre_push(repo, remote_sha=main)
+        self.assertEqual(done.returncode, 0, done.stdout + done.stderr)
+        self.assertIn("tests=3 ", done.stdout)
+        self.assertEqual(self.ran(repo), "x")
+
+    def test_a_destination_missing_here_is_read_from_the_remote_tracking_ref(self):
+        repo = self.repo()
+        sh(repo, "update-ref", "refs/remotes/origin/main", "HEAD")
+        self.write(repo, "test_sample.py", suite(1))
+        self.set_test(repo, min_tests=1)
+        done = self.pre_push(repo, remote_sha="1" * 40)
+        self.assertEqual(done.returncode, 1, done.stdout + done.stderr)
+        self.assertIn("below the floor of 3", done.stdout)
+
+    def test_a_brand_new_protected_branch_uses_heads_settings(self):
+        repo = self.repo()
+        self.set_test(repo, min_tests=4)
+        done = self.pre_push(repo, "refs/heads/master")
+        self.assertEqual(done.returncode, 1, done.stdout + done.stderr)
+        self.assertIn("below the floor of 4", done.stdout)
 
 
 class StatusWording(GateCase):

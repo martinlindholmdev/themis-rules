@@ -1,4 +1,4 @@
-<!-- themis v3.5 begin -->
+<!-- themis v3.5.1 begin -->
 # Agent rules
 
 Agents write this code; the owner reads results, not code. [check] marks
@@ -60,4 +60,4 @@ Work
     never saw this conversation.
 
 Start with `python3 tools/themis.py status`: it lists what is on.
-<!-- themis v3.5 end -->
+<!-- themis v3.5.1 end -->

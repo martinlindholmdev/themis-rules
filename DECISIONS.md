@@ -205,3 +205,8 @@ there. `tools/themis.py` and `install.py` never raise this file, and
   the `docs_only` list), and a documents-only reuse needs the same hash and
   no change to `themis.json` itself, because a broad list such as `*.json`
   could otherwise let a raised floor pass on the old counts.
+- v3.5.1: the pre-push gate judges a push to a protected branch by the test
+  settings at the destination's current commit (the pushed-over sha when this
+  clone has it, else the remote-tracking ref), and uses HEAD's only for a new
+  branch, so a push cannot delete, weaken or edit its own gate; a destination
+  it cannot read refuses the push and asks for a fetch.
