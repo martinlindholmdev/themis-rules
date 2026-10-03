@@ -106,6 +106,26 @@ class MovedEntryTests(unittest.TestCase):
         self.move(long_function(), functions={"b.py": {"big": 120}, "c.py": {"big": 120}})
         self.assert_refused(self.themis("check", "--staged"), entry="big: new entry")
 
+    def test_two_sources_find_their_destinations_in_either_baseline_order(self):
+        self.write("d.py", PY + "\n\n" + long_function())
+        self.baseline({"a.py": {"big": 130}, "d.py": {"big": 120}})
+        self.stage("d.py", "themis-baseline.json")
+        git(self.root, "commit", "-q", "-m", "two sources", "--no-verify")
+        base = git(self.root, "rev-parse", "HEAD").stdout.strip()
+        for order in ((("b.py", 120), ("c.py", 130)), (("c.py", 130), ("b.py", 120))):
+            with self.subTest(order=order):
+                git(self.root, "reset", "-q", "--hard", base)
+                for rel in ("b.py", "c.py"):
+                    self.write(rel, PY + "\n\n" + long_function())
+                for rel in ("a.py", "d.py"):
+                    self.write(rel, PY + "\n\ndef small():\n    return 1\n")
+                self.baseline({rel: {"big": size} for rel, size in order})
+                self.stage("a.py", "b.py", "c.py", "d.py", "themis-baseline.json")
+                staged = self.themis("check", "--staged")
+                git(self.root, "commit", "-q", "-m", "split", "--no-verify")
+                ranged = self.themis("check", "--range", "HEAD~1...HEAD")
+                self.assertEqual((staged.returncode, ranged.returncode), (0, 0), staged.stdout + ranged.stdout)
+
     def test_a_move_that_keeps_the_old_entry_is_refused(self):
         self.move(long_function(), functions={"a.py": {"big": 120}, "b.py": {"big": 120}})
         self.assert_refused(self.themis("check", "--staged"))

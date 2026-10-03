@@ -499,25 +499,29 @@ def write_baseline(root: Path, config: dict, data: dict) -> None:
     path = safe_rel_path(root, config["baseline_path"])
     path.write_text(json.dumps(data, indent=1, ensure_ascii=False) + "\n", encoding="utf-8")
 
-def _paid_by_move(old_functions: dict, new_functions: dict, path: str, name: str, size: int,
-                  moved: Callable[[str, str, str], bool], paid: set) -> bool:
-    """An old entry for `name` under another path, gone from the new baseline,
-    not smaller, not already used, and confirmed by moved(old, new, name)."""
-    for source, funcs in old_functions.items():
-        old_size = funcs.get(name)
-        if (source != path and old_size is not None and size <= old_size and (source, name) not in paid
-                and name not in new_functions.get(source, {}) and moved(source, path, name)):
-            paid.add((source, name))
-            return True
-    return False
+def _paid_by_move(old_functions: dict, new_functions: dict, wanted: list, moved: Callable) -> set:
+    """The new (path, name) entries that old entries pay for, one each, found by augmenting paths over the
+    confirmed pairs so entry order never matters. Eligible: an old entry of that name under another path,
+    gone from the new baseline, not smaller, and moved(old, new, name) confirms the text."""
+    options = {(path, name): [(src, name) for src, funcs in old_functions.items() if src != path
+                              and size <= funcs.get(name, -1) and name not in new_functions.get(src, {})
+                              and moved(src, path, name)] for path, name, size in wanted}
+    owner: Dict[Tuple[str, str], Tuple[str, str]] = {}
+
+    def place(dest: Tuple[str, str], seen: set) -> bool:
+        for source in (s for s in options[dest] if s not in seen):
+            seen.add(source)
+            if source not in owner or place(owner[source], seen):
+                owner[source] = dest
+                return True
+        return False
+    return {dest for dest in options if place(dest, set())}
 
 def baseline_ratchet_violations(head_text: str, new_text: str,
                                 moved: Optional[Callable[[str, str, str], bool]] = None) -> List[str]:
-    """A number that went up, or an entry that is new, is a violation —
-    the baseline only ever goes down. The one exception: a new `functions`
-    entry that moved(old_path, new_path, name) confirms is the same function
-    moved unchanged, carrying the old path's entry; each old entry pays once.
-    Pure function: no git, easy to test."""
+    """A raised number or a new entry is a violation: the baseline only goes down. The one exception: a
+    new `functions` entry that moved(old_path, new_path, name) confirms is the same function moved
+    unchanged carries the old path's entry; each old entry pays once. Pure: no git, easy to test."""
     try:
         head = json.loads(head_text)
     except json.JSONDecodeError:
@@ -536,17 +540,17 @@ def baseline_ratchet_violations(head_text: str, new_text: str,
             elif isinstance(value, (int, float)) and value > old:
                 problems.append("%s.%s: raised from %s to %s" % (section, path, old, value))
     old_functions, new_functions = head.get("functions", {}), new.get("functions", {})
-    paid: set = set()
+    wanted = []
     for path, funcs in new_functions.items():
-        old_funcs = old_functions.get(path, {})
         for name, size in funcs.items():
-            old_size = old_funcs.get(name)
+            old_size = old_functions.get(path, {}).get(name)
             if old_size is None:
-                if moved is None or not _paid_by_move(old_functions, new_functions, path, name, size, moved, paid):
-                    problems.append("functions %s/%s: new entry (%s)" % (path, name, size))
+                wanted.append((path, name, size))
             elif size > old_size:
                 problems.append("functions %s/%s: raised from %s to %s" % (path, name, old_size, size))
-    return problems
+    paid = _paid_by_move(old_functions, new_functions, wanted, moved) if moved else set()
+    return problems + ["functions %s/%s: new entry (%s)" % (path, name, size)
+                       for path, name, size in wanted if (path, name) not in paid]
 
 def lang_problems(root: Path, config: dict, rev: str, head_text: str, new_text: str) -> List[str]:
     """New or raised `lang` entries must be backed by the base commit's own
