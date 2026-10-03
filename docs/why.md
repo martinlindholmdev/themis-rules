@@ -1,31 +1,33 @@
 # Why the rules are as they are
 
 One entry per rule in [RULES.md](../RULES.md): why the rule exists and,
-where one exists, a public source. "Project judgement" marks a rule that
-rests on this project's own reasoning, not on a published source. A source
-supports the reason given; it does not endorse Themis.
+where one exists, a public source. The rules apply to any repository and any
+coding agent, not to a particular project or vendor. "Themis's own choice"
+marks a design choice Themis makes for every repository, with no study behind
+it. A source supports the reason given; it does not endorse Themis.
 
 Two reasons apply to all of the rules. A rules file is advice, while a hook
-or a required CI check is enforced, so Themis checks what a script can check
-([Claude Code memory](https://code.claude.com/docs/en/memory),
-[Claude Code best practices](https://code.claude.com/docs/en/best-practices)).
+or a required CI check enforces a condition, so Themis checks what a script
+can check ([Claude Code memory](https://code.claude.com/docs/en/memory),
+[Codex hooks](https://learn.chatgpt.com/docs/hooks),
+[GitHub protected branches](https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-protected-branches/about-protected-branches)).
 The block is kept short because instruction following falls as the number of
 instructions grows ([IFScale](https://arxiv.org/abs/2507.11538)).
 
 ## Shape
 
 **1. Size limits and a baseline that only shrinks.** Agents work less well
-as their context fills, so smaller files and functions are cheaper to read
-and to change ([Claude Code best practices](https://code.claude.com/docs/en/best-practices),
+as their context fills, so smaller files and functions limit how much must
+be read at once ([Claude Code best practices](https://code.claude.com/docs/en/best-practices),
 [Chroma: context rot](https://www.trychroma.com/research/context-rot)).
-The numbers 800 and 100 are project judgement; Google's Python guide suggests
+The numbers 800 and 100 are Themis's own choice; Google's Python guide suggests
 considering a split past about 40 lines ([Google Python style guide](https://google.github.io/styleguide/pyguide.html)).
 
 **2. A header on every source file.** The header tells an agent what a file
 is for and what must not change, at the moment it opens the file. A module
 docstring has precedent ([Google Python style guide](https://google.github.io/styleguide/pyguide.html),
 [ruff D100](https://docs.astral.sh/ruff/rules/undocumented-public-module/)).
-The four fields are project judgement, and no study measures their effect.
+The four fields are Themis's own choice, and no study measures their effect.
 
 **3. Comments say what the code does now.** A wrong comment misleads a model
 more than a missing one does ([arXiv 2404.03114](https://arxiv.org/abs/2404.03114)).
@@ -54,25 +56,28 @@ Some planted changes alter nothing an owner would notice, so a surviving one
 is read before it counts as a missing test
 ([Google: practical mutation testing](https://arxiv.org/abs/2102.11378)).
 
-**8. A code map, held to the tree by a test.** A map lets an agent find the
-right file without reading the tree. Hand-written repository overviews have
+**8. A code map, held to the tree by a test.** A map is intended to help an
+agent find the right file without reading the tree; its use is Themis's own
+choice, not a demonstrated benefit. Hand-written repository overviews have
 not been shown to help agents ([arXiv 2602.11988](https://arxiv.org/abs/2602.11988)),
 and stale documentation misleads them ([arXiv 2404.03114](https://arxiv.org/abs/2404.03114)),
 so the map is short and a test keeps it true. Aider builds its map from the
-code for the same reason ([Aider repository map](https://aider.chat/2023/10/22/repomap.html)).
+code to keep it current ([Aider repository map](https://aider.chat/2023/10/22/repomap.html)).
 
-**9. A long job logs its duration.** Project judgement. One line makes a slow
-or stuck job visible without extra tooling.
+**9. A long job logs its duration.** Themis's own choice: one line makes a
+slow or stuck job visible without extra tooling.
 
 ## Work
 
 **10. A plan for anything larger than one sentence, reviewed by another model.**
-The one-sentence threshold matches vendor advice
-([Claude Code best practices](https://code.claude.com/docs/en/best-practices)).
+Vendors recommend scoping tasks and planning when needed; the one-sentence
+threshold comes from Claude Code advice
+([Claude Code best practices](https://code.claude.com/docs/en/best-practices),
+[Codex best practices](https://learn.chatgpt.com/guides/best-practices)).
 A model tends to prefer its own output ([arXiv 2404.13076](https://arxiv.org/abs/2404.13076)),
 which favours a different reviewer. Errors are correlated across models too
 ([Kim et al., ICML 2025](https://proceedings.mlr.press/v267/kim25e.html)),
-so a second model reduces the risk but does not remove it.
+so a second model is a cross-check, not a guarantee.
 
 **11. Change only what the task names; ask before a dependency.** A change
 outside the task is one the owner did not ask for and may not see
@@ -86,21 +91,23 @@ them, and telling them not to has little effect
 [Anthropic: long-running agents](https://www.anthropic.com/engineering/effective-harnesses-for-long-running-agents)).
 The rule names the forms this takes so a reviewer can look for them.
 
-**13. Done means shown output and a review.** The owner reads results, not
-code, so a claim of success needs its evidence beside it
+**13. Done means shown output and a review.** An owner needs evidence of
+success, not just an agent's claim
 ([Claude Code best practices](https://code.claude.com/docs/en/best-practices),
-[Cognition: testing](https://cognition.com/blog/testing-development)).
+[Cognition: testing](https://cognition.com/blog/testing-development),
+[Codex best practices](https://learn.chatgpt.com/guides/best-practices)).
 The acceptance gate turns "the tests ran and passed" into a check.
 
 **14. No secrets; stage by name; never skip the hook.** A committed secret
 stays in history. A local hook can be skipped
-([git push](https://git-scm.com/docs/git-push)), and a required check on a
-protected branch cannot
+([git push](https://git-scm.com/docs/git-push)), whereas a required check on a
+protected branch blocks merging unless it passes or an authorised actor
+bypasses protection
 ([GitHub protected branches](https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-protected-branches/about-protected-branches)),
-so CI is the backstop. Staging by name is project judgement: it keeps
+so CI is the backstop. Staging by name is Themis's own choice: it keeps
 unrelated files out of a commit.
 
-**15. Decisions go in a log.** An agent starts each session without the last
-one's conversation. Notes kept outside the context window carry decisions
-forward ([Anthropic: context engineering](https://www.anthropic.com/engineering/effective-context-engineering-for-ai-agents),
+**15. Decisions go in a log.** An agent cannot rely on a previous session's
+conversation being available. Notes kept outside the context window carry
+decisions forward ([Anthropic: context engineering](https://www.anthropic.com/engineering/effective-context-engineering-for-ai-agents),
 [Anthropic: long-running agents](https://www.anthropic.com/engineering/effective-harnesses-for-long-running-agents)).
