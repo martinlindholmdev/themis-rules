@@ -235,16 +235,16 @@ a protected branch. `tools/hooks/pre-push` hands git's ref lines to `gate
 `test.pre_push_branches` (default `["main", "master"]`), read from HEAD's
 committed `themis.json` and from the destination's current commit, so a
 change cannot drop its own branch from the list. The destination's current
-commit is the remote sha git hands the hook when this clone has that object,
-else the remote-tracking ref for that branch. A gated line is judged by the
+commit is the remote sha git hands the hook. A gated line is judged by the
 test settings committed there (command, runner, patterns, floor, skip
 ceiling, timeout, `docs_only`, `pre_push_branches`), as CI judges a change by
 its base commit, so a push that deletes the `test` section, lowers the floor
 or edits the command is still judged by the settings already on the branch.
-Only a brand-new branch uses HEAD's settings. A destination this clone has no
-trace of, or whose remote-tracking refs disagree on the settings, refuses the
-push and asks for a fetch. Lowering the floor stays a change the owner makes
-on the base branch first, with `gate --lower`. A push of
+Only a brand-new branch (an all-zero remote sha) uses HEAD's settings. A push
+to any branch whose current remote commit is not in this clone is refused
+with a request to fetch and push again, before protection is decided, since a
+stale remote-tracking ref is not the destination's current commit. Lowering the floor stays a change the owner makes on the base
+branch first, with `gate --lower`. A push of
 feature branches, tags or deletions runs nothing; in a mixed push only the
 protected destinations are checked. Each gated commit must have the
 checked-out commit's tree, or the push is refused before any test runs, with

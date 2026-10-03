@@ -527,22 +527,11 @@ def execute(root: Path, cfg_rev: str, target: str, local: bool, reuse: bool,
     return 0, cfg, ran
 
 
-def _destinations(root: Path, remote_ref: str, remote_sha: str) -> List[str]:
-    """The destination branch's current commit as this clone knows it: the
-    pushed-over sha when that object is here, else each remote-tracking ref
-    for that branch with its own test section. None when the branch does not
-    exist on the remote yet (an all-zero sha) or this clone has no trace of it,
-    which the caller refuses rather than guess."""
-    if set(remote_sha) == {"0"}:
-        return []
-    if _rev(root, remote_sha + "^{commit}") is not None:
-        return [remote_sha]
-    branch, found = remote_ref[len("refs/heads/"):], {}
-    for line in git(root, "for-each-ref", "--format=%(objectname) %(refname)", "refs/remotes/").splitlines():
-        sha, _, ref = line.partition(" ")
-        if ref.split("/", 3)[3:] == [branch]:
-            found.setdefault(json.dumps(raw_test_at(root, sha)[0], sort_keys=True), sha)
-    return list(found.values())
+def _destination_readable(root: Path, remote_sha: str) -> bool:
+    """True when the destination's current commit is a new branch (all-zero
+    sha) or an object present in this clone; git's advertised sha is the only
+    commit whose settings count, so a stale remote-tracking ref never stands in."""
+    return set(remote_sha) == {"0"} or _rev(root, remote_sha + "^{commit}") is not None
 
 
 def _branches_at(root: Path, rev: str) -> List[str]:
@@ -558,8 +547,9 @@ def pre_push(root: Path, lines: List[str]) -> int:
     (test.pre_push_branches at HEAD or at the destination's current commit)
     is gated, under the test settings at the destination's current commit,
     or HEAD's when the branch is new, so a push cannot remove, weaken or skip
-    its own gate. Each gated commit must have the checked-out tree, since
-    that is the tree the gate tests."""
+    its own gate; a branch update whose current commit this clone lacks is
+    refused. Each gated commit must have the checked-out tree, since that is
+    the tree the gate tests."""
     pushes = [p for p in (line.split() for line in lines) if len(p) == 4 and set(p[1]) != {"0"}]
     if not pushes:
         return 0
@@ -570,14 +560,15 @@ def pre_push(root: Path, lines: List[str]) -> int:
     head_branches = head_cfg.branches if head_cfg is not None else []
     gated = []
     for local_ref, local_sha, remote_ref, remote_sha in pushes:
-        dests = _destinations(root, remote_ref, remote_sha) if remote_ref.startswith("refs/heads/") else []
-        protected = head_branches + [b for d in dests for b in _branches_at(root, d)]
-        if not remote_ref.startswith("refs/heads/") or remote_ref[len("refs/heads/"):] not in protected:
+        if not remote_ref.startswith("refs/heads/"):
             continue
-        if len(dests) > 1 or (not dests and set(remote_sha) != {"0"}):
-            return _fail(["the current commit of %s is not in this clone, or its remote-tracking refs disagree "
-                          "on the test settings; fetch it, then push again" % _safe(remote_ref)])
-        gated.append((local_ref, local_sha, dests[0] if dests else "HEAD"))
+        if not _destination_readable(root, remote_sha):
+            return _fail(["the current commit of %s is not in this clone, so its test settings cannot be read; "
+                          "fetch, then push again" % _safe(remote_ref)])
+        new = set(remote_sha) == {"0"}
+        protected = head_branches + ([] if new else _branches_at(root, remote_sha))
+        if remote_ref[len("refs/heads/"):] in protected:
+            gated.append((local_ref, local_sha, "HEAD" if new else remote_sha))
     if not gated:
         print("themis: pre-push: nothing pushed to %s, so no tests run here; CI runs them"
               % (", ".join(_safe(b) for b in head_branches) or "a protected branch"))

@@ -379,14 +379,23 @@ class PrePush(GateCase):
         self.assertIn("tests=3 ", done.stdout)
         self.assertEqual(self.ran(repo), "x")
 
-    def test_a_destination_missing_here_is_read_from_the_remote_tracking_ref(self):
-        repo = self.repo()
+    def test_a_destination_commit_missing_here_refuses_even_with_a_tracking_ref(self):
+        repo = self.counting_repo()
         sh(repo, "update-ref", "refs/remotes/origin/main", "HEAD")
-        self.write(repo, "test_sample.py", suite(1))
-        self.set_test(repo, min_tests=1)
         done = self.pre_push(repo, remote_sha="1" * 40)
         self.assertEqual(done.returncode, 1, done.stdout + done.stderr)
-        self.assertIn("below the floor of 3", done.stdout)
+        self.assertIn("fetch, then push again", done.stdout + done.stderr)
+        self.assertEqual(self.ran(repo), "")
+
+    def test_removing_the_gate_over_a_destination_missing_here_is_refused_not_skipped(self):
+        repo = self.repo()
+        config = json.loads((repo / "themis.json").read_text(encoding="utf-8"))
+        config.pop("test", None)
+        (repo / "themis.json").write_text(json.dumps(config), encoding="utf-8")
+        self.commit(repo, "drop the gate")
+        done = self.pre_push(repo, remote_sha="1" * 40)
+        self.assertEqual(done.returncode, 1, done.stdout + done.stderr)
+        self.assertIn("fetch, then push again", done.stdout + done.stderr)
 
     def test_a_brand_new_protected_branch_uses_heads_settings(self):
         repo = self.repo()
