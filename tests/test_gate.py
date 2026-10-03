@@ -83,7 +83,7 @@ class GateCase(unittest.TestCase):
                   "sys.exit(subprocess.call([sys.executable, '-m', 'unittest']))\n")
         repo = self.repo()
         self.write(repo, "run_tests.py", script)
-        self.write(repo, ".gitignore", "ran.log\n")
+        self.write(repo, ".gitignore", "ran.log\n__pycache__/\n")
         self.set_test(repo, command=[sys.executable, "run_tests.py"])
         return repo
 
