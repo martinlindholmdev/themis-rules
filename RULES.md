@@ -6,6 +6,7 @@ what `tools/themis.py` and its hook enforce. The rest holds only because
 you read it.
 
 Shape
+
 1. [check] No file over 800 lines, no function over 100. Baseline sizes
    may shrink, never grow (`rebaseline` only lowers them). Over the limit:
    split the code. Never raise a limit.
@@ -35,6 +36,7 @@ Shape
 9. A scheduled or long-running job ends with one log line giving its duration.
 
 Work
+
 10. A change you can describe in one sentence: start. Anything else: a plan
     under 20 lines, reviewed by a different model first.
 11. Change only what the task names. Stop and ask before a new dependency,
