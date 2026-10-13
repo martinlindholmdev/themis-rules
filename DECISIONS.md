@@ -238,3 +238,5 @@ there. `tools/themis.py` and `install.py` never raise this file, and
   then run nowhere locally gets one note saying so; and the plan opens
   with, and the run ends with, one line naming every path written, the
   baseline included, so an upgrade note can be true. No version bump.
+
+- v3.5.4 (2026-10-13): release of the upgrade-install fixes above (edited pre-commit kept, nothing added unasked on an upgrade, every written path named).

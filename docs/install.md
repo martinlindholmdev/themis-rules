@@ -4,8 +4,8 @@ Run inside the target repository:
 
 ```
 THEMIS_SRC=$(mktemp -d)
-git clone --depth 1 --branch v3.5.3 https://github.com/martinlindholmdev/themis-rules "$THEMIS_SRC"
-git -C "$THEMIS_SRC" describe --tags --exact-match  # must print v3.5.3
+git clone --depth 1 --branch v3.5.4 https://github.com/martinlindholmdev/themis-rules "$THEMIS_SRC"
+git -C "$THEMIS_SRC" describe --tags --exact-match  # must print v3.5.4
 python3 "$THEMIS_SRC/install.py" install
 ```
 
@@ -80,7 +80,7 @@ passes `--workflows` (or `--test-command`, for the gate workflow), and no
 runs nowhere locally it says so. A hook under `tools/hooks` or a gate workflow the
 owner edited is left as it is, with the line it must run printed. Without a
 terminal to confirm on, an upgrade writes nothing unless `--yes` is given. A
-repository already on v3.5.3 prints "nothing to change" and writes nothing.
+repository already on v3.5.4 prints "nothing to change" and writes nothing.
 
 ### Upgrading from v3.4
 
