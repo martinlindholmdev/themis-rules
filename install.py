@@ -69,6 +69,9 @@ def do_install(root: Path, args: argparse.Namespace) -> int:
             print("note: " + note)
         print("themis: nothing to change")
         return 0
+    upgrading = any(n.startswith("upgrading Themis") for n in notes)
+    print("themis: this %s writes %d path(s): %s"
+          % ("upgrade" if upgrading else "install", len(changes), PLAN.touched_paths(changes)))
     PLAN.print_plan(changes)
     for note in notes:
         print("note: " + note)
@@ -85,8 +88,8 @@ def do_install(root: Path, args: argparse.Namespace) -> int:
     failures, failed_rels = PLAN.apply_plan(root, changes)
     for failure in failures:
         print("note: " + failure)
+    print("themis: written: " + PLAN.touched_paths(changes, exclude=failed_rels))
     PLAN.run_verified_status(root)
-    upgrading = any(n.startswith("upgrading Themis") for n in notes)
     message = "Upgrade Themis to %s" % THEMIS.SCRIPT_VERSION if upgrading else "Install Themis"
     PLAN.print_commit_instructions(root, changes, message, exclude=failed_rels)
     return 0
@@ -385,6 +388,8 @@ def main(argv: Optional[List[str]] = None) -> int:
                            help="how to read its output: unittest, pytest or cargo; guessed from the command if omitted")
     install_p.add_argument("--pre-push", action="store_true",
                            help="write the pre-push hook even when CI runs the gate")
+    install_p.add_argument("--workflows", action="store_true",
+                           help="on an upgrade, also add the CI workflow files the repository lacks")
     uninstall_p = sub.add_parser("uninstall")
     uninstall_p.add_argument("--dry-run", action="store_true")
     uninstall_p.add_argument("--yes", action="store_true", help="skip the confirmation prompt")

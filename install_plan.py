@@ -7,7 +7,7 @@ Invariants: same as install.py's — no network access, never executes code
 from the target repo, every write goes through safe_path.
 Never change without a decision: the adapter table, the machine-path
 table, and the marker text (must match tools/themis.py's MARKER); the
-gate workflow and the pre-push hook are written once and never overwritten.
+gate workflow and both hooks are written once and never overwritten.
 """
 
 from __future__ import annotations
@@ -48,6 +48,7 @@ CI_WORKFLOW = GATE.CI_WORKFLOW
 GATE_WORKFLOW = GATE.GATE_WORKFLOW
 GATE_WORKFLOW_REL = ".github/workflows/themis-gate.yml"
 PRE_PUSH_REL = "tools/hooks/pre-push"
+PRE_COMMIT_REL = "tools/hooks/pre-commit"
 #: matches a themis marker (THEMIS.MARKER) as well as an older agent-rules one,
 #: so an upgrade can find and replace a v1/v2 block, not just a v3 one.
 ANY_MARKER = re.compile(r"<!--\s*(agent-rules|themis)\s+(v\d+(?:\.\d+)*)\s+begin\s*-->")
@@ -118,7 +119,7 @@ class Change:
 #: a new one is proven by hash instead of scrolling ~600 lines of diff
 #: past the owner.
 TOOL_FILES = tuple("tools/" + name for name in GATE.TOOL_NAMES)
-VENDORED_FILES = TOOL_FILES + ("tools/hooks/pre-commit", PRE_PUSH_REL, ".github/workflows/themis.yml",
+VENDORED_FILES = TOOL_FILES + (PRE_COMMIT_REL, PRE_PUSH_REL, ".github/workflows/themis.yml",
                                GATE_WORKFLOW_REL)
 
 def _redact_secrets(diff_lines: List[str]) -> List[str]:
@@ -132,6 +133,11 @@ def _redact_secrets(diff_lines: List[str]) -> List[str]:
         label = next((label for label, pattern in THEMIS.SECRET_PATTERNS if pattern.search(body)), None)
         out.append(line if label is None else "%s[redacted: looks like %s]\n" % (line[:1], label))
     return out
+
+def touched_paths(changes: List[Change], exclude: Set[str] = frozenset()) -> str:
+    """Every path (and git config key) a plan writes, as one comma-separated
+    line, so the owner and the upgrade note can name them all."""
+    return ", ".join(c.rel for c in changes if c.rel not in exclude)
 
 def print_plan(changes: List[Change]) -> None:
     for change in changes:
@@ -202,6 +208,12 @@ def git_remote_is_github(root: Path) -> bool:
         return False
     return "github.com" in url.lower()
 
+#: the one hook command, inserted into whatever hook file or manager is present
+CALL_LINE = "python3 tools/themis.py check --staged"
+LEFTHOOK_BLOCK = "pre-commit:\n  commands:\n    themis:\n      run: %s\n" % CALL_LINE
+PRECOMMIT_BLOCK = ("-   repo: local\n    hooks:\n    -   id: themis\n        name: themis\n"
+                    "        entry: %s\n        language: system\n        pass_filenames: false\n" % CALL_LINE)
+
 # ---------------------------------------------------------------- core files
 
 def rules_block() -> str:
@@ -220,10 +232,15 @@ def plan_core_files(root: Path, notes: Optional[List[str]] = None, test: Optiona
     if (root / "tools" / "agent_rules.py").exists():
         changes.append(Change("tools/agent_rules.py", read_text(root, "tools/agent_rules.py"), None))
 
-    src_hook = (HERE / "tools" / "hooks" / "pre-commit").read_text(encoding="utf-8")
-    cur_hook = read_text(root, "tools/hooks/pre-commit")
-    if cur_hook != src_hook:
-        changes.append(Change("tools/hooks/pre-commit", cur_hook, src_hook, executable=True))
+    src_hook = (HERE / PRE_COMMIT_REL).read_text(encoding="utf-8")
+    cur_hook = read_text(root, PRE_COMMIT_REL)
+    if cur_hook is None:
+        changes.append(Change(PRE_COMMIT_REL, None, src_hook, executable=True))
+    elif cur_hook != src_hook:
+        # the owner's, like a differing pre-push hook: their own checks may
+        # be in it, so it is never replaced, only reminded of the call line
+        notes.append("%s exists and differs from this release's hook, so it is left as it is (your own "
+                     "checks may be in it); make sure it runs `%s`" % (PRE_COMMIT_REL, CALL_LINE))
 
     config_path = root / THEMIS.CONFIG_NAME
     legacy_config = root / "agent-rules.json"
@@ -422,11 +439,6 @@ def _drop_legacy_calls(text: str) -> str:
     kept = [line for line in text.splitlines() if "agent_rules.py" not in line]
     return "\n".join(kept) + ("\n" if text.endswith("\n") else "")
 
-CALL_LINE = "python3 tools/themis.py check --staged"
-LEFTHOOK_BLOCK = "pre-commit:\n  commands:\n    themis:\n      run: %s\n" % CALL_LINE
-PRECOMMIT_BLOCK = ("-   repo: local\n    hooks:\n    -   id: themis\n        name: themis\n"
-                    "        entry: %s\n        language: system\n        pass_filenames: false\n" % CALL_LINE)
-
 def plan_hook(root: Path) -> Tuple[List[Change], List[str]]:
     """Wires the hook the documented way for whichever manager is present,
     or stops with exact instructions rather than editing a generated
@@ -488,7 +500,7 @@ def plan_classic_hook(root: Path) -> Tuple[List[Change], List[str]]:
         except PathEscapesRepo:
             return [], ["%s points outside this repo; set it to a path inside the repo by hand" % location]
     if rel == os.path.join("tools", "hooks", "pre-commit"):
-        return [], []  # plan_core_files already keeps our own vendored copy current
+        return [], []  # plan_core_files writes our own copy once and leaves an edited one
     # the default (unconfigured) case is trusted to resolve outside root
     # for a worktree or submodule only because git's own --git-path hooks
     # computed it — restricted here to paths that are actually under a
@@ -602,24 +614,32 @@ def plan_adapters(root: Path, agents: Tuple[str, ...] = ()) -> Tuple[List[Change
 
 # ------------------------------------------------------------- CI backstop
 
-def plan_ci_workflow(root: Path) -> List[Change]:
+def plan_ci_workflow(root: Path, may_add: bool) -> Tuple[List[Change], List[str]]:
+    """themis.yml is replaced whenever it differs; a missing one is added
+    only when `may_add` (a fresh install, or --workflows on an upgrade)."""
     if not git_remote_is_github(root):
-        return []
+        return [], []
     current = read_text(root, ".github/workflows/themis.yml")
     if current == CI_WORKFLOW:
-        return []
-    return [Change(".github/workflows/themis.yml", current, CI_WORKFLOW)]
+        return [], []
+    if current is None and not may_add:
+        return [], [_not_added(".github/workflows/themis.yml")]
+    return [Change(".github/workflows/themis.yml", current, CI_WORKFLOW)], []
 
-def plan_gate_workflow(root: Path, has_test: bool) -> Tuple[List[Change], List[str]]:
+def _not_added(rel: str) -> str:
+    return "%s is not added on an upgrade (themis.json is already here); pass --workflows to add it" % rel
+
+def plan_gate_workflow(root: Path, has_test: bool, may_add: bool) -> Tuple[List[Change], List[str]]:
     """themis-gate.yml is written once, when a test command is set and a
-    GitHub remote exists. An existing file is the owner's, with toolchain
-    steps in it: it is never replaced, and a difference from this release's
-    template is only printed."""
+    GitHub remote exists, and only when `may_add` (a fresh install, a
+    --test-command passed now, or --workflows). An existing file is the
+    owner's, with toolchain steps in it: it is never replaced, and a
+    difference from this release's template is only printed."""
     if not has_test or not git_remote_is_github(root):
         return [], []
     current = read_text(root, GATE_WORKFLOW_REL)
     if current is None:
-        return [Change(GATE_WORKFLOW_REL, None, GATE_WORKFLOW)], []
+        return ([Change(GATE_WORKFLOW_REL, None, GATE_WORKFLOW)], []) if may_add else ([], [_not_added(GATE_WORKFLOW_REL)])
     if current == GATE_WORKFLOW:
         return [], []
     diff = "".join(_redact_secrets(GATE.workflow_difference(GATE_WORKFLOW_REL, current, GATE_WORKFLOW)
@@ -681,6 +701,14 @@ def build_install_plan(root: Path, args: argparse.Namespace) -> Tuple[List[Chang
     previous = THEMIS.installed_version(root) or THEMIS.load_config(root)["version"]
     if previous and previous != THEMIS.SCRIPT_VERSION:
         notes.append("upgrading Themis %s to %s" % (previous, THEMIS.SCRIPT_VERSION))
+    # a repository that already has themis.json is being upgraded or re-run:
+    # it gets no workflow file it does not have unless the owner asks
+    upgrade = read_text(root, THEMIS.CONFIG_NAME) is not None
+    workflows_asked = bool(getattr(args, "workflows", False))
+    if git_remote_is_github(root):
+        notes.append("CI workflows: %s" % ("an upgrade, so none is added unasked" if upgrade and not workflows_asked
+                                           else "a fresh install, so missing ones are written" if not upgrade
+                                           else "added on request (--workflows)"))
     test = planned_test_section(root, args)
     changes = plan_core_files(root, notes, test)
     answers = resolve_answers(root, args)
@@ -688,7 +716,8 @@ def build_install_plan(root: Path, args: argparse.Namespace) -> Tuple[List[Chang
     hook_changes, hook_notes = plan_hook(root)
     changes += hook_changes
     notes += hook_notes
-    gate_changes, gate_notes = plan_gate_workflow(root, test is not None)
+    gate_changes, gate_notes = plan_gate_workflow(root, test is not None,
+                                                  not upgrade or workflows_asked or bool(getattr(args, "test_command", "")))
     push_changes, push_notes = plan_pre_push(root, test is not None, hook_changes,
                                              ci_runs_gate(root, gate_changes), bool(getattr(args, "pre_push", False)))
     changes += push_changes
@@ -697,8 +726,9 @@ def build_install_plan(root: Path, args: argparse.Namespace) -> Tuple[List[Chang
     adapter_changes, adapter_notes = plan_adapters(root, agents)
     changes += adapter_changes
     notes += adapter_notes
-    ci_changes = plan_ci_workflow(root)
+    ci_changes, ci_notes = plan_ci_workflow(root, not upgrade or workflows_asked)
     changes += ci_changes
+    notes += ci_notes
     if any(c.old is not None for c in ci_changes):
         notes.append("replacing .github/workflows/themis.yml: CI now takes all four checker files from the base commit")
     changes += gate_changes
