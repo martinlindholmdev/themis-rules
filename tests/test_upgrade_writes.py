@@ -1,8 +1,9 @@
 """Purpose: prove that an upgrade install changes only what the owner expects
 and says what it writes: an owner-edited pre-commit hook is kept byte for
 byte with the line to add printed, no workflow file is added to a repository
-that has none unless --workflows asks for it, and the plan and the final
-summary name every path written, the baseline included.
+that has none unless --workflows asks for it, no pre-push hook is added on an
+upgrade unless --pre-push or --test-command asks for it, and the plan and the
+final summary name every path written, the baseline included.
 Entry points: run by `python3 -m unittest discover -s tests`.
 Invariants: every repository is a throwaway under a TemporaryDirectory; no
 network; this checkout is only read.
@@ -93,6 +94,23 @@ class UpgradeWritesTests(unittest.TestCase):
         self.assertEqual(asked.returncode, 0, asked.stdout + asked.stderr)
         for rel in WORKFLOWS:
             self.assertTrue((repo / rel).is_file(), rel)
+
+    def test_an_upgrade_adds_no_pre_push_hook_unless_asked(self):
+        repo = self.repo(github=True)
+        done = self.install(repo, "--test-command", "python3 -m unittest")
+        self.assertEqual(done.returncode, 0, done.stdout + done.stderr)
+        for rel in WORKFLOWS:
+            (repo / rel).unlink()
+        self.make_previous_release(repo)
+        self.commit(repo, "a v3.5.2 install with a test key and no CI")
+        upgraded = self.install(repo)
+        self.assertEqual(upgraded.returncode, 0, upgraded.stdout + upgraded.stderr)
+        self.assertFalse((repo / "tools/hooks/pre-push").exists(), upgraded.stdout)
+        self.assertIn("gate runs nowhere locally", upgraded.stdout)
+        self.assertIn("--pre-push", upgraded.stdout)
+        asked = self.install(repo, "--pre-push")
+        self.assertEqual(asked.returncode, 0, asked.stdout + asked.stderr)
+        self.assertIn("gate --pre-push", (repo / "tools/hooks/pre-push").read_text(encoding="utf-8"))
 
     def test_the_plan_and_the_summary_name_the_baseline_when_it_changes(self):
         repo = self.repo()

@@ -232,6 +232,9 @@ there. `tools/themis.py` and `install.py` never raise this file, and
   once; a repository that already has `themis.json` gets no workflow file it
   lacks unless `--workflows` is passed (a `--test-command` passed now still
   brings its gate workflow), while an existing `themis.yml` is still
-  replaced and a fresh install writes both as before; and the plan opens
+  replaced and a fresh install writes both as before; by the same rule a
+  missing `tools/hooks/pre-push` is added only on a fresh install, with
+  `--pre-push` or with `--test-command`, and an upgrade whose gate would
+  then run nowhere locally gets one note saying so; and the plan opens
   with, and the run ends with, one line naming every path written, the
   baseline included, so an upgrade note can be true. No version bump.

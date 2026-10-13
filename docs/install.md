@@ -74,8 +74,10 @@ rewrites the baseline when an upgrade lowers an entry or seeds its `lang`
 section from HEAD's committed content. Files that already exist are not held
 to rule 2's header. An upgrade never adds a `test` key, and a repository that
 already has `themis.json` gets no workflow file it lacks unless the owner
-passes `--workflows` (or `--test-command`, for the gate workflow); the plan
-says which case applies. A hook under `tools/hooks` or a gate workflow the
+passes `--workflows` (or `--test-command`, for the gate workflow), and no
+`tools/hooks/pre-push` it lacks unless the owner passes `--pre-push` or
+`--test-command`; the plan says which case applies, and when the gate then
+runs nowhere locally it says so. A hook under `tools/hooks` or a gate workflow the
 owner edited is left as it is, with the line it must run printed. Without a
 terminal to confirm on, an upgrade writes nothing unless `--yes` is given. A
 repository already on v3.5.3 prints "nothing to change" and writes nothing.

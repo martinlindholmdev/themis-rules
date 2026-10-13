@@ -135,8 +135,7 @@ def _redact_secrets(diff_lines: List[str]) -> List[str]:
     return out
 
 def touched_paths(changes: List[Change], exclude: Set[str] = frozenset()) -> str:
-    """Every path (and git config key) a plan writes, as one comma-separated
-    line, so the owner and the upgrade note can name them all."""
+    """Every path (or git config key) a plan writes, as one line naming them all."""
     return ", ".join(c.rel for c in changes if c.rel not in exclude)
 
 def print_plan(changes: List[Change]) -> None:
@@ -208,7 +207,6 @@ def git_remote_is_github(root: Path) -> bool:
         return False
     return "github.com" in url.lower()
 
-#: the one hook command, inserted into whatever hook file or manager is present
 CALL_LINE = "python3 tools/themis.py check --staged"
 LEFTHOOK_BLOCK = "pre-commit:\n  commands:\n    themis:\n      run: %s\n" % CALL_LINE
 PRECOMMIT_BLOCK = ("-   repo: local\n    hooks:\n    -   id: themis\n        name: themis\n"
@@ -237,8 +235,7 @@ def plan_core_files(root: Path, notes: Optional[List[str]] = None, test: Optiona
     if cur_hook is None:
         changes.append(Change(PRE_COMMIT_REL, None, src_hook, executable=True))
     elif cur_hook != src_hook:
-        # the owner's, like a differing pre-push hook: their own checks may
-        # be in it, so it is never replaced, only reminded of the call line
+        # the owner's, like a differing pre-push hook: never replaced, only reminded of the call line
         notes.append("%s exists and differs from this release's hook, so it is left as it is (your own "
                      "checks may be in it); make sure it runs `%s`" % (PRE_COMMIT_REL, CALL_LINE))
 
@@ -615,8 +612,7 @@ def plan_adapters(root: Path, agents: Tuple[str, ...] = ()) -> Tuple[List[Change
 # ------------------------------------------------------------- CI backstop
 
 def plan_ci_workflow(root: Path, may_add: bool) -> Tuple[List[Change], List[str]]:
-    """themis.yml is replaced whenever it differs; a missing one is added
-    only when `may_add` (a fresh install, or --workflows on an upgrade)."""
+    """themis.yml is replaced whenever it differs; added only when `may_add` (fresh, or --workflows)."""
     if not git_remote_is_github(root):
         return [], []
     current = read_text(root, ".github/workflows/themis.yml")
@@ -630,11 +626,10 @@ def _not_added(rel: str) -> str:
     return "%s is not added on an upgrade (themis.json is already here); pass --workflows to add it" % rel
 
 def plan_gate_workflow(root: Path, has_test: bool, may_add: bool) -> Tuple[List[Change], List[str]]:
-    """themis-gate.yml is written once, when a test command is set and a
-    GitHub remote exists, and only when `may_add` (a fresh install, a
-    --test-command passed now, or --workflows). An existing file is the
-    owner's, with toolchain steps in it: it is never replaced, and a
-    difference from this release's template is only printed."""
+    """themis-gate.yml is written once, when a test command is set, a GitHub
+    remote exists and `may_add` (a fresh install, --test-command passed now,
+    or --workflows). An existing file is the owner's, with toolchain steps in
+    it: never replaced, and a difference from this release's template is only printed."""
     if not has_test or not git_remote_is_github(root):
         return [], []
     current = read_text(root, GATE_WORKFLOW_REL)
@@ -659,12 +654,13 @@ def ci_runs_gate(root: Path, gate_changes: List[Change]) -> bool:
     return git_remote_is_github(root) and (bool(gate_changes) or THEMIS.gate.runs_gate_in_ci(root))
 
 def plan_pre_push(root: Path, has_test: bool, hook_changes: List[Change], ci: bool,
-                  forced: bool) -> Tuple[List[Change], List[str]]:
+                  forced: bool, may_add: bool) -> Tuple[List[Change], List[str]]:
     """The pre-push hook that runs the gate, created when a test command is
     set, no CI runs the gate (or the owner passed --pre-push), git is going
-    to read tools/hooks and no such file exists; an existing one that differs
-    is the owner's and is never replaced. Any other hook setup gets the line
-    to add by hand instead of an adapter."""
+    to read tools/hooks, no such file exists and `may_add` (a fresh install,
+    --pre-push, or --test-command passed now: an upgrade adds nothing unasked);
+    an existing one that differs is the owner's and is never replaced. Any
+    other hook setup gets the line to add by hand instead of an adapter."""
     if not has_test:
         return [], []
     if ci and not forced and read_text(root, PRE_PUSH_REL) is None:
@@ -675,6 +671,9 @@ def plan_pre_push(root: Path, has_test: bool, hook_changes: List[Change], ci: bo
                     "charge); add `python3 tools/themis.py gate --pre-push` to your pre-push by hand"]
     source = (HERE / PRE_PUSH_REL).read_text(encoding="utf-8")
     current = read_text(root, PRE_PUSH_REL)
+    if current is None and not may_add:
+        return [], ["pre-push: not added on an upgrade (themis.json is already here), so the gate runs nowhere "
+                    "locally; pass --pre-push to add %s" % PRE_PUSH_REL]
     if current is None:
         return [Change(PRE_PUSH_REL, None, source, executable=True)], []
     if current == source:
@@ -701,14 +700,13 @@ def build_install_plan(root: Path, args: argparse.Namespace) -> Tuple[List[Chang
     previous = THEMIS.installed_version(root) or THEMIS.load_config(root)["version"]
     if previous and previous != THEMIS.SCRIPT_VERSION:
         notes.append("upgrading Themis %s to %s" % (previous, THEMIS.SCRIPT_VERSION))
-    # a repository that already has themis.json is being upgraded or re-run:
-    # it gets no workflow file it does not have unless the owner asks
+    # a repository that already has themis.json gets nothing new unless the owner asks
     upgrade = read_text(root, THEMIS.CONFIG_NAME) is not None
     workflows_asked = bool(getattr(args, "workflows", False))
     if git_remote_is_github(root):
-        notes.append("CI workflows: %s" % ("an upgrade, so none is added unasked" if upgrade and not workflows_asked
-                                           else "a fresh install, so missing ones are written" if not upgrade
-                                           else "added on request (--workflows)"))
+        notes.append("CI workflows: " + ("a fresh install, so missing ones are written" if not upgrade else
+                                         "added on request (--workflows)" if workflows_asked else
+                                         "an upgrade, so none is added unasked"))
     test = planned_test_section(root, args)
     changes = plan_core_files(root, notes, test)
     answers = resolve_answers(root, args)
@@ -716,10 +714,13 @@ def build_install_plan(root: Path, args: argparse.Namespace) -> Tuple[List[Chang
     hook_changes, hook_notes = plan_hook(root)
     changes += hook_changes
     notes += hook_notes
+    test_asked = bool(getattr(args, "test_command", ""))
     gate_changes, gate_notes = plan_gate_workflow(root, test is not None,
-                                                  not upgrade or workflows_asked or bool(getattr(args, "test_command", "")))
+                                                  not upgrade or workflows_asked or test_asked)
+    forced = bool(getattr(args, "pre_push", False))
     push_changes, push_notes = plan_pre_push(root, test is not None, hook_changes,
-                                             ci_runs_gate(root, gate_changes), bool(getattr(args, "pre_push", False)))
+                                             ci_runs_gate(root, gate_changes), forced,
+                                             not upgrade or forced or test_asked)
     changes += push_changes
     notes += push_notes
     agents = tuple(a.strip().lower() for a in (getattr(args, "agents", None) or "").split(","))
