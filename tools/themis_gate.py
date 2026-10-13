@@ -7,7 +7,7 @@ also holds the git runner and the hook, CI and gate lines `status` prints.
 Entry points: run() for `themis.py gate` (plain, --range A...B, --reuse,
 --pre-push, --record, --lower N --reason TEXT), add_arguments(),
 parse_test_config(), runs_gate_in_ci(), status_lines(), git(), hooks_dir(),
-hook_status().
+hook_status(), safe_rel_path().
 Invariants: standard library only, python3 3.9+, no network access; the
 command is an argv list run without a shell and with no stdin; its
 settings come from the BASE commit's themis.json (A for --range, the
@@ -39,7 +39,7 @@ import shutil
 import signal
 import subprocess
 import sys
-from pathlib import Path
+from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Callable, List, NamedTuple, Optional, Tuple
 
 SELF_NAME = "themis.py"
@@ -56,6 +56,33 @@ PRESETS = {
     "cargo": (r"^running (\d+) tests?$", r"\b(\d+) ignored\b"),
 }
 _ANSI = re.compile(r"\x1b\[[0-9;?]*[ -/]*[@-~]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)")
+
+class PathEscapesRepo(ValueError):
+    pass
+
+def safe_rel_path(root: Path, rel: str) -> Path:
+    """Confines an owner/agent-controlled repo-relative path (today: only
+    themis.json's baseline_path) to the repo: no control character (a
+    newline could turn a printed error into a second, executable line if
+    pasted — so this is never echoed back when it is the problem), no
+    absolute path, no '..', and no symlink component anywhere, leaf or
+    parent — even one that would resolve back inside the repo, since a
+    write through it still lands on a different real file than named."""
+    if any(ord(c) < 0x20 or ord(c) == 0x7f for c in rel):
+        raise PathEscapesRepo("a control character is not allowed in a path")
+    candidate = Path(rel)
+    # rooted under either convention: on Windows "/etc/passwd" has no
+    # drive, so Path.is_absolute() is False, yet root / it escapes the repo
+    if candidate.is_absolute() or PurePosixPath(rel).is_absolute() or PureWindowsPath(rel).anchor:
+        raise PathEscapesRepo("%s: an absolute path is not allowed" % rel)
+    if ".." in candidate.parts:
+        raise PathEscapesRepo("%s: '..' is not allowed" % rel)
+    current = root
+    for part in candidate.parts:
+        current = current / part
+        if current.is_symlink():
+            raise PathEscapesRepo("%s: a symlink component is not allowed" % rel)
+    return current
 
 
 def git(root: Path, *args: str) -> str:
