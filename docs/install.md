@@ -63,22 +63,30 @@ it yet: without that file, Aider's auto-commit skips every hook.
 
 ## Updating
 
-Re-running `install` is safe. Run it from a newer tag to update the checker,
-the hooks and the rules block in place. An install over an older version is
-an upgrade, and the plan says so. It writes the checker files that differ
-(v3.4 added `tools/themis_gate.py`), replaces `.github/workflows/themis.yml`,
-adds `header_exempt_prefixes` to `themis.json` and keeps every other setting,
-and seeds the baseline's `lang` section from HEAD's committed content. Files
-that already exist are not held to rule 2's header. An upgrade never adds a
-`test` key or a gate workflow unasked, and a gate workflow the owner edited is
-left as it is. A repository already on v3.5.3 prints "nothing to change" and
-writes nothing.
+Re-running `install` is safe. Run it from a newer tag to update the checker
+and the rules block in place. An install over an older version is an
+upgrade, and the plan says so. Its first line names every path the run
+writes, and the line `themis: written:` after the run names what was. It
+writes the checker files that differ (v3.4 added `tools/themis_gate.py`),
+replaces an existing `.github/workflows/themis.yml`, adds
+`header_exempt_prefixes` to `themis.json` and keeps every other setting, and
+rewrites the baseline when an upgrade lowers an entry or seeds its `lang`
+section from HEAD's committed content. Files that already exist are not held
+to rule 2's header. An upgrade never adds a `test` key, and a repository that
+already has `themis.json` gets no workflow file it lacks unless the owner
+passes `--workflows` (or `--test-command`, for the gate workflow), and no
+`tools/hooks/pre-push` it lacks unless the owner passes `--pre-push` or
+`--test-command`; the plan says which case applies, and when the gate then
+runs nowhere locally it says so. A hook under `tools/hooks` or a gate workflow the
+owner edited is left as it is, with the line it must run printed. Without a
+terminal to confirm on, an upgrade writes nothing unless `--yes` is given. A
+repository already on v3.5.3 prints "nothing to change" and writes nothing.
 
 ### Upgrading from v3.4
 
-Install never replaces a `tools/hooks/pre-push` or a `themis-gate.yml` that
-differs from the current template, so a v3.4 repository keeps both as they
-are until the owner refreshes them by hand:
+Install never replaces a `tools/hooks/pre-commit`, a `tools/hooks/pre-push`
+or a `themis-gate.yml` that differs from the current template, so a v3.4
+repository keeps them as they are until the owner refreshes them by hand:
 
 - The v3.4 hook runs the full gate on every push, whatever branch. To get the
   v3.5 hook, which gates only pushes to a protected branch, and only if the

@@ -225,3 +225,16 @@ there. `tools/themis.py` and `install.py` never raise this file, and
   re-exported. Not a version bump: no check, rule or output changes.
 
 - v3.5.3 (2026-10-13): release of the sys.path fix above; the four checker files changed, so installed repositories update with `install.py install`.
+- An upgrade install changes only what the owner expects and names what it
+  writes: a `tools/hooks/pre-commit` that differs from the release's is left
+  as it is with the call line printed, exactly like a differing pre-push
+  hook, because a project check the owner added there was silently dropped
+  once; a repository that already has `themis.json` gets no workflow file it
+  lacks unless `--workflows` is passed (a `--test-command` passed now still
+  brings its gate workflow), while an existing `themis.yml` is still
+  replaced and a fresh install writes both as before; by the same rule a
+  missing `tools/hooks/pre-push` is added only on a fresh install, with
+  `--pre-push` or with `--test-command`, and an upgrade whose gate would
+  then run nowhere locally gets one note saying so; and the plan opens
+  with, and the run ends with, one line naming every path written, the
+  baseline included, so an upgrade note can be true. No version bump.
