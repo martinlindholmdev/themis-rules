@@ -23,14 +23,23 @@ enforces the config already on HEAD and the baseline already staged (or,
 failing that, on HEAD), never an unstaged edit on disk, so editing either
 in the same commit does nothing; `--range` does the same against A; the
 header check reads only files added relative to that base, under its
-config, and is skipped with a note when the base has no themis.json.
+config, and is skipped with a note when the base has no themis.json; the
+script's own folder leaves sys.path before any import but `sys` (built in) and
+`os` (loaded by site before that folder is on the path); there is no `from
+__future__` line, which imports too; so a target's tools/json.py never runs.
 Never change without a decision: the two hard limits, the marker text,
 the themis.json field names, and the secret pattern list — the four tools
 files are vendored byte-for-byte; themis_lang.py, themis_scan.py and
 themis_gate.py must sit beside this file or the run ends at once with one line.
 """
 
-from __future__ import annotations
+# Drops the script's own folder (a target repository's tools/) from sys.path
+# before any other import; the header says why only os and sys may precede it.
+import os
+import sys
+_own = (os.path.dirname(os.path.abspath(__file__)), os.path.dirname(os.path.realpath(__file__)))
+if sys.path and sys.path[0] in _own:
+    del sys.path[0]
 
 import argparse
 import ast
@@ -38,9 +47,8 @@ import json
 import re
 import importlib.util
 import subprocess
-import sys
 import textwrap
-from pathlib import Path, PurePosixPath, PureWindowsPath
+from pathlib import Path
 from typing import Callable, Dict, List, Optional, Tuple
 
 SCRIPT_VERSION = "v3.5.2"
@@ -78,6 +86,8 @@ history_hits = lang.history_hits
 hooks_dir = gate.hooks_dir
 hook_status = gate.hook_status
 _git = gate.git
+safe_rel_path = gate.safe_rel_path
+PathEscapesRepo = gate.PathEscapesRepo
 
 #: extension -> (line-comment prefix, block-comment (start, end), "python" if measurable)
 _HASH = ("#", None, None)
@@ -317,33 +327,6 @@ class Findings:
         self.problems: List[str] = []
         self.notes: List[str] = []
         self.generated: List[str] = []
-
-class PathEscapesRepo(ValueError):
-    pass
-
-def safe_rel_path(root: Path, rel: str) -> Path:
-    """Confines an owner/agent-controlled repo-relative path (today: only
-    themis.json's baseline_path) to the repo: no control character (a
-    newline could turn a printed error into a second, executable line if
-    pasted — so this is never echoed back when it is the problem), no
-    absolute path, no '..', and no symlink component anywhere, leaf or
-    parent — even one that would resolve back inside the repo, since a
-    write through it still lands on a different real file than named."""
-    if any(ord(c) < 0x20 or ord(c) == 0x7f for c in rel):
-        raise PathEscapesRepo("a control character is not allowed in a path")
-    candidate = Path(rel)
-    # rooted under either convention: on Windows "/etc/passwd" has no
-    # drive, so Path.is_absolute() is False, yet root / it escapes the repo
-    if candidate.is_absolute() or PurePosixPath(rel).is_absolute() or PureWindowsPath(rel).anchor:
-        raise PathEscapesRepo("%s: an absolute path is not allowed" % rel)
-    if ".." in candidate.parts:
-        raise PathEscapesRepo("%s: '..' is not allowed" % rel)
-    current = root
-    for part in candidate.parts:
-        current = current / part
-        if current.is_symlink():
-            raise PathEscapesRepo("%s: a symlink component is not allowed" % rel)
-    return current
 
 def load_baseline(root: Path, config: dict, ref: Optional[str] = None) -> dict:
     try:

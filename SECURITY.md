@@ -39,6 +39,10 @@ has no release SLA; expect an acknowledgement, not a guaranteed fix date.
   test command it writes into `themis.json` (it reads root-level file names
   only, to print a suggestion). It never runs `git commit`; it prints the
   command. It makes no network requests.
+- `tools/themis.py` drops its own folder from `sys.path` before its first
+  standard-library import, so a file in the target repository's `tools/`
+  named like a standard module (`json.py`, `re.py`, `__future__.py`) is never
+  imported in place of the real one by the hook, CI or a direct run.
 - The acceptance gate (`gate`) does run the test command the owner set under
   `test` in `themis.json`, and only then: with no `test` section nothing runs.
   The command is an argv list run without a shell and with no stdin; its

@@ -216,3 +216,10 @@ there. `tools/themis.py` and `install.py` never raise this file, and
   without rewriting its long functions; the text must match exactly (common
   indentation and trailing whitespace aside), the old file must no longer
   define it, and each old entry pays once. `lang` entries do not move.
+- `tools/themis.py` removes its own folder from `sys.path` before its first
+  standard-library import and carries no `from __future__` line (that line
+  imports a module too), so a target-authored `tools/json.py` or similar can
+  no longer run under the hook, CI or a direct run. The file was at the
+  800-line limit, so `safe_rel_path` and `PathEscapesRepo` moved unchanged
+  to `themis_gate.py` (which already receives that function) and are
+  re-exported. Not a version bump: no check, rule or output changes.
