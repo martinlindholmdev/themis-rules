@@ -223,3 +223,5 @@ there. `tools/themis.py` and `install.py` never raise this file, and
   800-line limit, so `safe_rel_path` and `PathEscapesRepo` moved unchanged
   to `themis_gate.py` (which already receives that function) and are
   re-exported. Not a version bump: no check, rule or output changes.
+
+- v3.5.3 (2026-10-13): release of the sys.path fix above; the four checker files changed, so installed repositories update with `install.py install`.

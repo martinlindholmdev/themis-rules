@@ -51,7 +51,7 @@ import textwrap
 from pathlib import Path
 from typing import Callable, Dict, List, Optional, Tuple
 
-SCRIPT_VERSION = "v3.5.2"
+SCRIPT_VERSION = "v3.5.3"
 
 FILE_MAX_LINES = 800
 FUNCTION_MAX_LINES = 100

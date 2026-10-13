@@ -4,8 +4,8 @@ Run inside the target repository:
 
 ```
 THEMIS_SRC=$(mktemp -d)
-git clone --depth 1 --branch v3.5.2 https://github.com/martinlindholmdev/themis-rules "$THEMIS_SRC"
-git -C "$THEMIS_SRC" describe --tags --exact-match  # must print v3.5.2
+git clone --depth 1 --branch v3.5.3 https://github.com/martinlindholmdev/themis-rules "$THEMIS_SRC"
+git -C "$THEMIS_SRC" describe --tags --exact-match  # must print v3.5.3
 python3 "$THEMIS_SRC/install.py" install
 ```
 
@@ -71,7 +71,7 @@ adds `header_exempt_prefixes` to `themis.json` and keeps every other setting,
 and seeds the baseline's `lang` section from HEAD's committed content. Files
 that already exist are not held to rule 2's header. An upgrade never adds a
 `test` key or a gate workflow unasked, and a gate workflow the owner edited is
-left as it is. A repository already on v3.5.2 prints "nothing to change" and
+left as it is. A repository already on v3.5.3 prints "nothing to change" and
 writes nothing.
 
 ### Upgrading from v3.4
