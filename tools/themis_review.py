@@ -21,13 +21,15 @@ literal.
 
 from __future__ import annotations
 
+import ast
 import fnmatch
 import json
 import posixpath
 import re
 import subprocess
 from pathlib import Path
-from typing import Callable, Dict, List, NamedTuple, Optional, Tuple
+from collections import Counter
+from typing import Callable, Dict, List, NamedTuple, Optional, Set, Tuple
 from urllib.parse import unquote
 
 TOTAL_KEY = "<total>"
@@ -346,17 +348,20 @@ def docs_raised(committed_text: str, fresh: dict) -> List[str]:
 
 
 def status_lines(root: Path, git: Git, config: dict) -> List[str]:
-    """Informational `status` lines: each default instruction document's
-    counted lines, or the budget in force."""
+    """Informational `status` lines: the test tripwire's mode and each default
+    instruction document's counted lines, or the budget in force."""
+    tamper, tamper_bad = tamper_settings(config)
+    lines = ["test tamper tripwire: " + (tamper["mode"] if tamper else "configured but not valid (%s)"
+                                         % "; ".join(tamper_bad))]
     settings, problems = docs_settings(config)
     if problems:
-        return ["documentation budget: configured but not valid (%s)" % "; ".join(problems)]
+        return lines + ["documentation budget: configured but not valid (%s)" % "; ".join(problems)]
     shown = settings or dict(DOC_DEFAULTS, check_links=False)
     measured = measure(Tree(root, git, None), shown)
     parts = ["%s %d%s" % (_safe(p), n, "/%d" % shown["caps"][p] if settings else "") for p, n in measured.lines.items()]
     head = "documentation budget" if settings else "instruction documents (no budget set)"
-    return ["%s: %s; with imported files %d%s" % (head, ", ".join(parts) or "none found", measured.total,
-                                                   "/%d" % shown["total"] if settings else "")]
+    return lines + ["%s: %s; with imported files %d%s" % (head, ", ".join(parts) or "none found", measured.total,
+                                                          "/%d" % shown["total"] if settings else "")]
 
 
 # ------------------------------------------------------------------- the run
@@ -412,8 +417,258 @@ def _docs_run(root: Path, git: Git, base: dict, rev: str, ref: str, diff_args: T
     return problems
 
 
+# -------------------------------------------------------------- test tamper
+
+TEST_GLOBS = ["test_*.py", "*_test.py", "tests/*", "test/*", "*_test.go", "*.test.*", "*.spec.*",
+              "*Test.java", "*Tests.swift"]
+TAMPER_DEFAULTS = {"mode": "note", "test_globs": TEST_GLOBS, "ignore_values": [0, 1, True, None, ""],
+                   "allow": []}
+MAX_FINDINGS = 10
+_SKIP_ATTRS = {"skip", "skipIf", "skipUnless", "skipTest", "xfail", "expectedFailure", "skipif"}
+_TOKENS = re.compile(r'//[^\n]*|/\*.*?\*/|"(?:[^"\\\n]|\\.)*"|\'(?:[^\'\\\n]|\\.)*\'|`(?:[^`\\]|\\.)*`'
+                     r'|\b\d+(?:\.\d+)?\b', re.S)
+_DEFS = re.compile(r"\b(?:def|func|fn|function|fun|void)\s+((?:test|Test)\w*|\w+_test|\w+Test)\b")
+_ASSERTS = re.compile(r"\b(?:assert\w*|expect|require|should)\s*[!(.]")
+_SKIPS = re.compile(r"\b(?:xit|xdescribe|xtest)\b|\b(?:it|test|describe)\.(?:skip|todo)\b"
+                    r"|@(?:Ignore|Disabled)\b|#\[ignore\b|\.Skip(?:f|Now)?\(")
+
+
+class Facts(NamedTuple):
+    funcs: Dict[str, Tuple[int, int, str]]     # test function -> first line, last line, structural dump
+    asserts: List[int]                         # line of each assertion
+    skips: int                                 # skip, xfail and ignore markers
+    literals: List[Tuple[str, object, int]]    # kind, value, line; values are never printed
+
+
+class Finding(NamedTuple):
+    blocking: bool
+    text: str
+
+
+def tamper_settings(config: dict) -> Tuple[Optional[dict], List[str]]:
+    """(settings, problems) for the `tamper` key; defaults when absent."""
+    raw = config.get("tamper", {})
+    if not isinstance(raw, dict):
+        return None, ["tamper must be an object"]
+    problems = ["tamper.%s is not a known key" % _safe(k) for k in raw if k not in TAMPER_DEFAULTS]
+    merged = dict(TAMPER_DEFAULTS, **{k: v for k, v in raw.items() if k in TAMPER_DEFAULTS})
+    if merged["mode"] not in ("note", "block", "off"):
+        problems.append("tamper.mode must be note, block or off")
+    for key in ("test_globs", "allow"):
+        if not _strings(merged[key]):
+            problems.append("tamper.%s must be a list of non-empty strings" % key)
+    values = merged["ignore_values"]
+    if not isinstance(values, list) or not all(v is None or isinstance(v, (str, int, float)) for v in values):
+        problems.append("tamper.ignore_values must be a list of strings, numbers, true, false or null")
+    return (None, problems) if problems else (merged, [])
+
+
+def _is_test(path: str, globs: List[str]) -> bool:
+    name = posixpath.basename(path)
+    return any(fnmatch.fnmatchcase(path, g) or fnmatch.fnmatchcase(name, g) for g in globs)
+
+
+def _test_functions(tree: ast.AST) -> Dict[str, Tuple[int, int, str]]:
+    found: Dict[str, Tuple[int, int, str]] = {}
+
+    def visit(node: ast.AST, prefix: str) -> None:
+        for child in ast.iter_child_nodes(node):
+            if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                if child.name.lower().startswith("test"):
+                    found[prefix + child.name] = (child.lineno, child.end_lineno, ast.dump(child))
+                visit(child, prefix + child.name + ".")
+            elif isinstance(child, ast.ClassDef):
+                visit(child, prefix + child.name + ".")
+            else:
+                visit(child, prefix)
+    visit(tree, "")
+    return found
+
+
+def python_facts(text: str) -> Optional[Facts]:
+    """Test functions, assertions, skip markers and literals of Python text
+    read through `ast`; None when this Python cannot parse it. Docstrings
+    are not literals; bool, None and complex constants are not either."""
+    try:
+        tree = ast.parse(text)
+    except (SyntaxError, ValueError, RecursionError, MemoryError):
+        return None
+    docstrings: Set[int] = set()
+    asserts: List[int] = []
+    literals: List[Tuple[str, object, int]] = []
+    skips = 0
+    for node in ast.walk(tree):
+        body = getattr(node, "body", None)
+        if isinstance(node, (ast.Module, ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)) and body:
+            first = body[0]
+            if isinstance(first, ast.Expr) and isinstance(first.value, ast.Constant):
+                docstrings.add(id(first.value))
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Assert):
+            asserts.append(node.lineno)
+        elif isinstance(node, ast.Call):
+            func = node.func
+            if (getattr(func, "attr", None) or getattr(func, "id", "")).startswith("assert"):
+                asserts.append(node.lineno)
+        elif isinstance(node, ast.Constant) and id(node) not in docstrings:
+            kind = {str: "str", bytes: "bytes", int: "int", float: "float"}.get(type(node.value))
+            if kind:
+                literals.append((kind, node.value, node.lineno))
+        if getattr(node, "attr", None) in _SKIP_ATTRS or getattr(node, "id", None) in _SKIP_ATTRS:
+            skips += 1
+    return Facts(_test_functions(tree), asserts, skips, literals)
+
+
+def pattern_facts(text: str) -> Facts:
+    """The same facts for any other language, from patterns: comments and
+    literals are blanked first, so a word inside either is never read as code."""
+    literals: List[Tuple[str, object, int]] = []
+    pieces, last = [], 0
+    for match in _TOKENS.finditer(text):
+        token = match.group(0)
+        line = text.count("\n", 0, match.start()) + 1
+        if token[0] not in "/0123456789":
+            literals.append(("str", token[1:-1], line))
+        elif token[0] != "/":
+            literals.append(("float" if "." in token else "int", float(token) if "." in token else int(token), line))
+        pieces += [text[last:match.start()], re.sub(r"[^\n]", " ", token)]
+        last = match.end()
+    code = "".join(pieces) + text[last:]
+    lines = lambda pattern: [code.count("\n", 0, m.start()) + 1 for m in pattern.finditer(code)]
+    funcs = {m.group(1): (code.count("\n", 0, m.start()) + 1,) * 2 + ("",) for m in _DEFS.finditer(code)}
+    return Facts(funcs, lines(_ASSERTS), len(_SKIPS.findall(code)), literals)
+
+
+def _facts(path: str, text: str, other: Optional[str]) -> Tuple[Facts, bool]:
+    """(facts, read by pattern). Python is read through `ast` only when both
+    sides parse, so the two sides' counts are comparable."""
+    if path.endswith((".py", ".pyi")):
+        facts = python_facts(text)
+        if facts is not None and (other is None or python_facts(other) is not None):
+            return facts, False
+    return pattern_facts(text), path.endswith((".py", ".pyi"))
+
+
+def _name_status(root: Path, git: Git, diff_args: Tuple[str, ...]) -> List[Tuple[str, Optional[str], Optional[str]]]:
+    """(status letter, base path, head path) for each changed file; the base
+    path is None for an addition and the head path None for a deletion."""
+    fields = [f for f in git(root, "diff", *diff_args, "--name-status", "-M", "-z").split("\0") if f]
+    out, i = [], 0
+    while i < len(fields):
+        status = fields[i][0]
+        if status in "RC" and i + 2 < len(fields):
+            out.append((status, fields[i + 1], fields[i + 2]))
+            i += 3
+        elif i + 1 < len(fields):
+            out.append((status, None if status == "A" else fields[i + 1], None if status == "D" else fields[i + 1]))
+            i += 2
+        else:
+            break
+    return out
+
+
+def _permitted(allow: List[str], path: str, name: str) -> bool:
+    """True when the owner listed `path::name`, by qualified or bare test name."""
+    return any(path + "::" + n in allow for n in (name, name.rsplit(".", 1)[-1]))
+
+
+def tamper_findings(root: Path, git: Git, settings: dict, rev: str, ref: str,
+                    diff_args: Tuple[str, ...]) -> List[Finding]:
+    """What a change removed from test files: a deleted file, lost literals
+    and added skip markers (the blocking kinds), then removed test functions
+    and a falling assertion count. A literal is lost when it occurs in the
+    base side of a changed test file and in no changed test file at the head;
+    it is reported by file, line, kind and count, never by value."""
+    ignore, allow = settings["ignore_values"], settings["allow"]
+    deleted, skipped, pairs = [], [], []
+    for status, old, new in _name_status(root, git, diff_args):
+        path = new or old
+        if not (_is_test(path, settings["test_globs"]) or (old and _is_test(old, settings["test_globs"]))) \
+                or path in allow or (old or "") in allow:
+            continue
+        if new is None:
+            deleted.append(Finding(True, "%s: test file deleted" % _safe(old)))
+            continue
+        base_text = _text_at(root, git, rev, old) if old else None
+        head_text = _text_at(root, git, ref, new)
+        if head_text is None:
+            continue
+        head, by_pattern = _facts(new, head_text, base_text)
+        base = _facts(old, base_text, head_text)[0] if base_text is not None else None
+        if by_pattern:
+            skipped.append(Finding(False, "%s: read by pattern, not as Python (this Python could not parse a side)"
+                                   % _safe(new)))
+        pairs.append((new, base, head))
+    head_values = {(kind, value) for _, _, head in pairs for kind, value, _ in head.literals}
+    added = Counter(dump for path, base, head in pairs for name, (_, _, dump) in head.funcs.items()
+                    if dump and (base is None or name not in base.funcs))
+    blocking, info = list(deleted), list(skipped)
+    for path, base, head in pairs:
+        if head.skips > (base.skips if base else 0):
+            blocking.append(Finding(True, "%s: %d skip, xfail or ignore marker(s) added"
+                                    % (_safe(path), head.skips - (base.skips if base else 0))))
+        if base is None:
+            continue
+        spans = [(a, b) for name, (a, b, _) in base.funcs.items() if _permitted(allow, path, name)]
+        inside = lambda line: any(a <= line <= b for a, b in spans)
+        lost: Dict[Tuple[str, object], int] = {}
+        for kind, value, line in base.literals:
+            if (kind, value) not in head_values and not inside(line) and not any(value == v for v in ignore):
+                lost[(kind, value)] = min(line, lost.get((kind, value), line))
+        if lost:
+            kinds = ", ".join("%d %s" % (n, k) for k, n in sorted(Counter(k for k, _ in lost).items()))
+            lines = sorted(set(lost.values()))
+            blocking.append(Finding(True, "%s:%d: %d literal(s) of the base version occur in no changed test file "
+                                    "(%s; base line(s) %s). Read the base file there."
+                                    % (_safe(path), lines[0], len(lost), kinds, ", ".join(map(str, lines[:5])))))
+        gone = []
+        for name, (_, _, dump) in sorted(base.funcs.items()):
+            if name in head.funcs or _permitted(allow, path, name):
+                continue
+            if dump and added[dump] > 0:
+                added[dump] -= 1
+                continue
+            gone.append(name)
+        if gone:
+            info.append(Finding(False, "%s: %d test function(s) removed: %s"
+                                % (_safe(path), len(gone), ", ".join(_safe(n) for n in gone[:5]) +
+                                   (" and %d more" % (len(gone) - 5) if len(gone) > 5 else ""))))
+        before = [line for line in base.asserts if not inside(line)]
+        if len(before) > len(head.asserts):
+            info.append(Finding(False, "%s: assertions fell from %d to %d"
+                                % (_safe(path), len(before), len(head.asserts))))
+    return blocking + info
+
+
+def _capped(texts: List[str], noun: str) -> List[str]:
+    return texts if len(texts) <= MAX_FINDINGS else texts[:MAX_FINDINGS] + [
+        "and %d more %s" % (len(texts) - MAX_FINDINGS, noun)]
+
+
+def _tamper_run(root: Path, git: Git, base: dict, rev: str, ref: str,
+                diff_args: Tuple[str, ...]) -> Tuple[List[str], List[str]]:
+    """(notes, problems) of the tripwire under the base config. In `note`
+    mode (the default) everything is a note; in `block` mode a deleted test
+    file, a lost literal and an added skip marker fail the change."""
+    settings, bad = tamper_settings(base)
+    if bad:
+        return [], ["themis.json at %s: %s" % (rev[:12], p) for p in bad]
+    if settings["mode"] == "off":
+        return [], []
+    try:
+        found = tamper_findings(root, git, settings, rev, ref, diff_args)
+    except subprocess.CalledProcessError:
+        return ["test tamper tripwire skipped: git could not read the change"], []
+    block = settings["mode"] == "block"
+    hint = " If this is deliberate, an owner lists it under tamper.allow in an earlier commit."
+    problems = [f.text + hint for f in found if f.blocking and block]
+    notes = [f.text for f in found if not (f.blocking and block)]
+    return _capped(notes, "tripwire note(s)"), _capped(problems, "tripwire problem(s)")
+
+
 def run_checks(root: Path, git: Git, base: dict, rev: str, ref: str,
                diff_args: Tuple[str, ...]) -> Tuple[List[str], List[str]]:
     """(notes, problems) of the opt-in checks for a change from `rev` to
     `ref` (":" is the index), under `base`, the config committed at `rev`."""
-    return [], _docs_run(root, git, base, rev, ref, diff_args)
+    notes, problems = _tamper_run(root, git, base, rev, ref, diff_args)
+    return notes, problems + _docs_run(root, git, base, rev, ref, diff_args)

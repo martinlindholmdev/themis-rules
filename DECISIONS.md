@@ -263,3 +263,12 @@ there. `tools/themis.py` and `install.py` never raise this file, and
   enables the budget and neither new debt nor growth beside the record can.
   `rebaseline` seeds entries from HEAD's committed content when the config has
   a `docs` key; install and upgrade seed nothing.
+- The test tamper tripwire (v3.6) lists what a change removed from test files:
+  a deleted file, lost literals, added skip markers, removed test functions and
+  a falling assertion count. Default mode is `note`; `block` fails only the
+  first three, because removed functions and fewer assertions are what a
+  lossless rewrite into a table produces. A lost literal is reported by place,
+  kind and count, never by value or hash, since it may be a committed credential
+  and SECURITY.md promises matched text is never printed. The `allow` list is
+  read from the base config only, so neither a same-commit edit nor a
+  decision-log line excuses a change. It lists and does not judge adequacy.

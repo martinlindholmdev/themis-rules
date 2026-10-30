@@ -152,6 +152,54 @@ reported by file and line; the matched text is never printed. The patterns
 are fixed in the checker. This is a pattern match, not a complete secret
 scanner.
 
+## Test tamper tripwire
+
+A change that deletes a test file, drops a table row from a test or adds a skip
+is listed, so a reviewer sees it. It lists; it does not judge whether the
+tests are adequate. The checks live in the optional `tools/themis_review.py`,
+run in `check --staged` and `check --range` (so a push is covered through CI),
+and not in plain `check` or the pre-push hook.
+
+```json
+"tamper": {"mode": "note", "test_globs": ["test_*.py", "*_test.py", "tests/*"],
+           "ignore_values": [0, 1, true, null, ""], "allow": ["tests/test_old.py"]}
+```
+
+- `mode`: `note` (the default) prints `note:` lines, at most 10 and then "and N
+  more", and never fails; `block` fails the commit or range on three kinds of
+  finding; `off` is silent. `test_globs` (matched with `fnmatch` on the path and
+  the file name) defaults to `test_*.py`, `*_test.py`, `tests/*`, `test/*`,
+  `*_test.go`, `*.test.*`, `*.spec.*`, `*Test.java` and `*Tests.swift`.
+- It reads each changed test file on both sides of the change
+  (`git diff --name-status -M`). Python is read through `ast`; any other
+  language, or Python this interpreter cannot parse on one side, is read by
+  patterns that blank comments and strings first.
+- Reported: a deleted test file; a test function present at the base and absent
+  at the head, by qualified name (unless an added test function in a changed
+  test file has an identical `ast.dump`, a structurally identical move); the
+  net fall in assertions per file; skip, xfail and ignore markers added; and
+  lost literals, the string, bytes, int and float constants that occur in the
+  base side of the changed test files and in no changed test file at the head.
+  Lost literals are reported by `file:line`, kind and count, never by value and
+  never by a hash of it, because a literal may be a committed credential; read
+  the base file at that line.
+- In `block` mode only a deleted test file, lost literals and an added skip
+  marker fail. Removed functions and falling assertion counts are printed in
+  every mode and never block by themselves, because a lossless rewrite of
+  many tests into one table produces exactly those. "lost literals: none"
+  therefore means only that this heuristic found no loss, not that a
+  consolidation is proven. Block mode is not general tamper prevention.
+- `allow` lists `path` (the file may change, be deleted, lose any of the above)
+  or `path::test_name` (that test, by qualified or bare name, and the literals
+  and assertions inside it, may go; for patterns-read files only the name is
+  excused). It is read from the base commit's `themis.json`, so an `allow` edit
+  in the same commit excuses nothing, and neither does a decision-log line.
+  `ignore_values` replaces the default list of constants never counted as lost.
+- Not seen: a dropped row whose literals all survive elsewhere (a changed
+  pairing, or an expected value reused by another case), a changed expected
+  value that is also used elsewhere, and any weakening that keeps every literal.
+  Re-running with planted bugs before deleting tests stays rule 7's advice.
+
 ## Documentation budget
 
 Off by default. An owner turns it on with a `docs` key in `themis.json`, and
@@ -399,6 +447,7 @@ after it is committed. Fields:
 - `test`: the acceptance gate's command, runner and floor, and
   `pre_push_branches`, `docs_only`, `docs_quick` and `quick`; see above.
 - `docs`: the documentation budget; see above. Absent means off.
+- `tamper`: the test tripwire; see above. Absent means `note` mode.
 - `extra_history_words`, `extra_extensions`, `baseline_path` and
   `decision_log`.
 

@@ -102,7 +102,10 @@ so requiring a person's approval for a new dependency is Themis's own choice.
 or scoring code to obtain higher scores; instructions not to cheat had nearly
 negligible effect
 ([METR: reward hacking](https://metr.org/blog/2025-06-05-recent-reward-hacking/)).
-Prohibiting these shortcuts in repository work is Themis's own choice.
+Prohibiting these shortcuts in repository work is Themis's own choice, and an
+opt-in tripwire lists the changes that would hide one (a deleted test file, a
+dropped table row, an added skip) so a reviewer looks at them; it lists, and does
+not judge whether the tests are adequate.
 
 **13. Done means shown output and a review.** An owner needs evidence of
 success, not just an agent's claim

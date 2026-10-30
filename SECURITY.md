@@ -22,7 +22,9 @@ has no release SLA; expect an acknowledgement, not a guaranteed fix date.
   occasionally flags something that is not one. Mark a confirmed false
   positive with `themis: allow-secret` on that line.
 - A matched secret is reported by file and line number. The matched text is
-  never printed, logged or included in any message.
+  never printed, logged or included in any message. The test tripwire holds
+  to the same rule: a literal removed from a test is reported by file, line,
+  kind and count, never by value or by a hash of it.
 - `exempt_files` in `themis.json` is the owner's bypass of the size,
   function and history checks for the files it names. It never skips the
   secret scan, and the list enforced is the one already committed at the
