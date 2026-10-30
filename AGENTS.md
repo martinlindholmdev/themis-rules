@@ -12,7 +12,9 @@ Layout:
 - `docs/frameworks.md`: the 17-agent support matrix.
 - `tools/themis.py`: the vendored checker. Never changed without updating
   every repository that has it. `tools/themis_lang.py`, `tools/themis_scan.py`
-  and `tools/themis_gate.py` (the acceptance gate) are vendored with it.
+  and `tools/themis_gate.py` (the acceptance gate) are vendored with it, and
+  so is the optional `tools/themis_review.py` (documentation budget, tamper
+  tripwire).
 - `install.py`, `install_plan.py` and `install_gate.py`: the commands, the plan
   building, and the two CI workflow templates. Run only in this repository,
   never vendored.

@@ -488,3 +488,36 @@ def leading_blocks(text: str, style: Tuple[Optional[str], Optional[Tuple[str, st
     if run:
         out.append((len(run), run))
     return out
+
+
+# ---- secrets -----------------------------------------------------------------
+#: a likely credential in a diff; fixed here on purpose, not extendable from themis.json
+SECRET_PATTERNS: List[Tuple[str, "re.Pattern[str]"]] = [
+    ("a private key block", re.compile(r"-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----")),
+    ("an Anthropic-shaped key", re.compile(r"\bsk-ant-[A-Za-z0-9_-]{10,}\b")),
+    ("an OpenAI-shaped key", re.compile(r"\bsk-[A-Za-z0-9_-]{16,}\b")),
+    ("a Stripe key", re.compile(r"\b[sr]k_(live|test)_[A-Za-z0-9]{10,}\b")),
+    ("a GitHub token", re.compile(r"\b(ghp|gho|github_pat)_[A-Za-z0-9_]{16,}\b")),
+    ("a Slack token", re.compile(r"\bxox[bpas]-[A-Za-z0-9-]{10,}\b")),
+    ("an AWS access key id", re.compile(r"\bAKIA[0-9A-Z]{16}\b")),
+    ("a Google API key", re.compile(r"\bAIza[0-9A-Za-z_-]{20,}\b")),
+    ("a bearer token", re.compile(
+        r'(?i)Authorization["\']?\s*:\s*["\']?Bearer\s+[A-Za-z0-9._-]{20,}')),
+    ("a credential assignment", re.compile(
+        r'(?i)\b\w*(?:password|secret|token|api_key)\w*\b["\']?\s*[:=]\s*'
+        r'["\']?(?=[^\s"\']*\d)[^\s"\']{16,}')),
+]
+ALLOW_MARKER = "themis: allow-secret"
+
+def secret_hits(additions: List[Tuple[str, int, str]]) -> List[str]:
+    """(path, line, text) tuples in; never echoes the matched text."""
+    problems = []
+    for path, line_no, text in additions:
+        if ALLOW_MARKER in text:
+            continue
+        for label, pattern in SECRET_PATTERNS:
+            if pattern.search(text):
+                problems.append("%s:%d: looks like %s. Remove it, or add `%s` on that line "
+                                 "if this is a false positive." % (path, line_no, label, ALLOW_MARKER))
+                break
+    return problems

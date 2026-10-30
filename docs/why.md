@@ -67,6 +67,15 @@ and incorrect documentation can hinder code understanding ([arXiv 2404.03114](ht
 so a short map checked against the tree is Themis's own choice. Aider builds
 its repository map automatically from source files using tree-sitter ([Aider repository map](https://aider.chat/2023/10/22/repomap.html)).
 
+An instruction document is read in every session, so its length is a standing
+cost. Anthropic's memory documentation targets under 200 lines per instruction
+file because longer files consume more context and reduce adherence
+([Claude Code memory](https://code.claude.com/docs/en/memory)), and Codex stops
+loading instruction files at a combined size, `project_doc_max_bytes`, 32 KiB
+by default ([Codex AGENTS.md guide](https://learn.chatgpt.com/docs/agent-configuration/agents-md)).
+Themis's opt-in documentation budget caps counted lines and checks local links;
+the numbers are the owner's to choose.
+
 **9. A long job logs its duration.** Themis's own choice: one line makes a
 slow or stuck job visible without extra tooling.
 

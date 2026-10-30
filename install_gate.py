@@ -27,7 +27,7 @@ import shlex
 from pathlib import Path
 from typing import List, Optional
 
-TOOL_NAMES = ("themis.py", "themis_lang.py", "themis_scan.py", "themis_gate.py")
+TOOL_NAMES = ("themis.py", "themis_lang.py", "themis_scan.py", "themis_gate.py", "themis_review.py")
 RUNNERS = ("unittest", "pytest", "cargo")
 SHELL_WORDS = ("&&", "||", ";", "|", "&", ">", ">>", "<", "2>&1")
 

@@ -248,3 +248,18 @@ there. `tools/themis.py` and `install.py` never raise this file, and
   full suite. `docs_only` wins when a path is in both lists. The checker's
   `settings` hash gains `quick` and the list only when the list is set, so
   existing receipts stay valid.
+- The documentation budget (v3.6) is opt-in through a `docs` key: caps on
+  named instruction documents, a total, and an optional dead-local-link check.
+  Its code is in a new optional file, `tools/themis_review.py`, which
+  `themis.py` loads if present and `gate` never loads, because an owner-owned
+  `themis-gate.yml` copies only the four older checker files and an upgrade must
+  not break it. With the file absent, a feature that was switched on fails
+  closed and nothing else changes. `SECRET_PATTERNS`, `ALLOW_MARKER` and
+  `secret_hits` moved unchanged to `themis_scan.py` to keep `themis.py` under
+  800 lines.
+- A `docs` baseline entry is accepted only when the base commit's tree
+  measures at least that number (as for `lang`) and the change's own tree
+  measures no more, so existing debt can be recorded in the commit that
+  enables the budget and neither new debt nor growth beside the record can.
+  `rebaseline` seeds entries from HEAD's committed content when the config has
+  a `docs` key; install and upgrade seed nothing.

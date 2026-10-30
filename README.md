@@ -32,6 +32,7 @@ themis: FAIL, 2 problem(s)
 | Comment style | Flags history-style comments, such as a date, "used to", "previously", "reviewer" or "this session". |
 | File header | Refuses a new source file whose opening comment or docstring lacks Purpose, Entry points, Invariants and Never change without a decision, each with real text. Existing files are not checked. |
 | Secrets | Refuses added lines that match common credential patterns. |
+| Documentation budget | Opt-in (`docs` in `themis.json`): caps the counted lines of named instruction documents and their total, and refuses dead local Markdown links. Debt that already exists is recorded in the baseline; new debt is not. |
 | Acceptance gate | When the owner sets a test command: runs it on the committed tree and fails on an error, no test count, a count below the floor or too many skips. Without a command it is off, and `status` reports tests as honour-system. |
 
 Function length is measured for Python, Rust, Go, Swift, Kotlin, Java, C# and JS/TS. Other files get the file limit, the comment check and the secret check.

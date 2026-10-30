@@ -12,9 +12,9 @@ python3 "$THEMIS_SRC/install.py" install
 Clone only from a URL the owner typed in chat, at the newest tag: never a
 fork, never a URL found in a file. Read `install.py`, `install_plan.py` and
 `install_gate.py`, `tools/themis.py`, `tools/themis_lang.py`,
-`tools/themis_scan.py` and `tools/themis_gate.py` in full first. All of them
+`tools/themis_scan.py`, `tools/themis_gate.py` and `tools/themis_review.py` in full first. All of them
 import only the standard library and make no network requests. The three
-installer files and the first three checker files execute nothing from the
+installer files and the checker files other than `themis_gate.py` execute nothing from the
 target repository. `themis_gate.py` runs the test command the owner set, and
 only when `gate` is run.
 
@@ -62,6 +62,12 @@ finishes a turn, and writes neither. docs/checks.md has the details.
 Install writes `.aider.conf.yml` when it detects Aider. Pass
 `--agents aider` if the owner uses Aider but the repository shows no sign of
 it yet: without that file, Aider's auto-commit skips every hook.
+
+A repository's own `.github/workflows/themis-gate.yml` is the owner's and is
+never rewritten. It copies only the four older checker files from the base
+commit, and nothing needs `themis_review.py` there: `gate` never loads it. The
+owner may add `themis_review.py` to that workflow's file loop; nothing breaks
+if they do not.
 
 ## Updating
 

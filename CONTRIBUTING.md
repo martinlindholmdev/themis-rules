@@ -11,9 +11,11 @@ python3 -m unittest discover -s tests
 python3 tools/themis.py check
 ```
 
-`tools/themis.py`, `tools/themis_lang.py`, `tools/themis_scan.py` and
-`tools/themis_gate.py` are copied byte for byte into every repository that
-installs Themis. A behaviour change in any of them is an upgrade for all of
+`tools/themis.py`, `tools/themis_lang.py`, `tools/themis_scan.py`,
+`tools/themis_gate.py` and the optional `tools/themis_review.py` are copied
+byte for byte into every repository that installs Themis. `themis.py` must
+never need `themis_review.py` to run `gate`: an older gate workflow copies only
+the first four files. A behaviour change in any of them is an upgrade for all of
 those repositories and needs a test in `tests/`. Each file stays under 800
 lines and uses the standard library only: no network, no dependencies.
 

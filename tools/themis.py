@@ -15,8 +15,7 @@ the project's own tests as an acceptance gate (see themis_gate.py).
 Invariants: standard library only, python3 3.9+, no network access;
 writes nothing except the baseline file, and only under `rebaseline`;
 every repo-specific value comes from `themis.json`, read fresh each run;
-"0 files measured" fails loudly; this script and its three siblings are never
-counted; a size or function limit may shrink, never grow; a matched
+"0 files measured" fails loudly; this script and its siblings are never counted; a size or function limit may shrink, never grow; a matched
 secret is never printed, only its file, line and shape; git always runs
 with quotepath off, so non-ASCII filenames are measured; `--staged`
 enforces the config already on HEAD and the baseline already staged (or,
@@ -30,7 +29,8 @@ __future__` line, which imports too; so a target's tools/json.py never runs.
 Never change without a decision: the two hard limits, the marker text,
 the themis.json field names, and the secret pattern list — the four tools
 files are vendored byte-for-byte; themis_lang.py, themis_scan.py and
-themis_gate.py must sit beside this file or the run ends at once with one line.
+themis_gate.py must sit beside this file or the run ends at once with one line;
+themis_review.py (opt-in checks) may be absent, and only a feature that needs it then fails.
 """
 
 # Drops the script's own folder (a target repository's tools/) from sys.path
@@ -60,7 +60,8 @@ CONFIG_NAME = "themis.json"
 MARKER = re.compile(r"<!--\s*themis\s+(v\d+(?:\.\d+)*)\s+begin\s*-->")
 
 #: the vendored tools files; excluded from every measured set.
-SELF_PATHS = ("tools/themis.py", "tools/themis_lang.py", "tools/themis_scan.py", "tools/themis_gate.py")
+SELF_PATHS = ("tools/themis.py", "tools/themis_lang.py", "tools/themis_scan.py", "tools/themis_gate.py",
+              "tools/themis_review.py")
 
 
 def _load_sibling(name: str):
@@ -82,6 +83,11 @@ try:
 except ImportError as exc:
     print("themis: cannot run: %s" % exc)
     sys.exit(1)
+try:
+    review = _load_sibling("themis_review")  # optional: `gate` never needs it
+except ImportError:
+    review = None
+REVIEW_MISSING = "optional checks unavailable: tools/themis_review.py not found, reinstall"
 history_hits = lang.history_hits
 hooks_dir = gate.hooks_dir
 hook_status = gate.hook_status
@@ -110,23 +116,10 @@ HISTORY_WORDS = re.compile(
 )
 _PRESENT_PASSIVE = re.compile(r"\b(is|are|be|been|being|get|gets)\s+$", re.IGNORECASE)
 
-#: a likely credential in a diff (not extendable from themis.json on purpose)
-SECRET_PATTERNS: List[Tuple[str, "re.Pattern[str]"]] = [
-    ("a private key block", re.compile(r"-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----")),
-    ("an Anthropic-shaped key", re.compile(r"\bsk-ant-[A-Za-z0-9_-]{10,}\b")),
-    ("an OpenAI-shaped key", re.compile(r"\bsk-[A-Za-z0-9_-]{16,}\b")),
-    ("a Stripe key", re.compile(r"\b[sr]k_(live|test)_[A-Za-z0-9]{10,}\b")),
-    ("a GitHub token", re.compile(r"\b(ghp|gho|github_pat)_[A-Za-z0-9_]{16,}\b")),
-    ("a Slack token", re.compile(r"\bxox[bpas]-[A-Za-z0-9-]{10,}\b")),
-    ("an AWS access key id", re.compile(r"\bAKIA[0-9A-Z]{16}\b")),
-    ("a Google API key", re.compile(r"\bAIza[0-9A-Za-z_-]{20,}\b")),
-    ("a bearer token", re.compile(
-        r'(?i)Authorization["\']?\s*:\s*["\']?Bearer\s+[A-Za-z0-9._-]{20,}')),
-    ("a credential assignment", re.compile(
-        r'(?i)\b\w*(?:password|secret|token|api_key)\w*\b["\']?\s*[:=]\s*'
-        r'["\']?(?=[^\s"\']*\d)[^\s"\']{16,}')),
-]
-ALLOW_MARKER = "themis: allow-secret"
+#: a likely credential in a diff (not extendable from themis.json on purpose); the list lives in themis_scan.py
+SECRET_PATTERNS = lang.SECRET_PATTERNS
+ALLOW_MARKER = lang.ALLOW_MARKER
+secret_hits = lang.secret_hits
 
 #: git always writes UTF-8; decoding with the platform default (cp1252 on
 #: a plain Windows console) silently mangles a non-ASCII filename instead
@@ -563,6 +556,22 @@ def baseline_problems(root: Path, config: dict, rev: str, new_ref: str, diff_arg
     return ["%s: the baseline only goes down; split the file instead (%s)"
             % (config["baseline_path"], "; ".join(violations))]
 
+def optional_checks(root: Path, rev: str, ref: str, diff_args: Tuple[str, ...]) -> Tuple[List[str], List[str]]:
+    """(notes, problems) of the opt-in checks in themis_review.py, under the
+    config committed at `rev`. Without that file, a repository that turned a
+    feature on fails closed; one that did not sees nothing."""
+    base = load_config_from_rev(root, rev)
+    if base is None:
+        return [], []
+    if review is not None:
+        return review.run_checks(root, _git, base, rev, ref, diff_args)
+    try:
+        has_docs = '"docs"' in read(root, base["baseline_path"], ref)
+    except subprocess.CalledProcessError:
+        has_docs = False
+    wanted = base.get("docs") is not None or has_docs or "block" in str(base.get("tamper", ""))
+    return [], [REVIEW_MISSING] if wanted else []
+
 def diff_additions(root: Path, *diff_args: str) -> List[Tuple[str, int, str]]:
     """An added line whose own content is "++ something" is rendered by
     git as "+++ something" — identical to a real file-header line — so a
@@ -593,19 +602,6 @@ def diff_additions(root: Path, *diff_args: str) -> List[Tuple[str, int, str]]:
             next_line += 1
     return additions
 
-def secret_hits(additions: List[Tuple[str, int, str]]) -> List[str]:
-    """(path, line, text) tuples in; never echoes the matched text."""
-    problems = []
-    for path, line_no, text in additions:
-        if ALLOW_MARKER in text:
-            continue
-        for label, pattern in SECRET_PATTERNS:
-            if pattern.search(text):
-                problems.append("%s:%d: looks like %s. Remove it, or add `%s` on that line "
-                                 "if this is a false positive." % (path, line_no, label, ALLOW_MARKER))
-                break
-    return problems
-
 def secret_problems(root: Path, *diff_args: str) -> List[str]:
     return secret_hits(diff_additions(root, *diff_args))
 
@@ -633,6 +629,8 @@ def print_status(root: Path, config: dict) -> int:
               % (config["version"], SCRIPT_VERSION))
     print("  hook: %s" % hook_status(root))
     for line in gate.status_lines(root, config.get("test")):
+        print("  " + line)
+    for line in (review.status_lines(root, _git, config) if review else [REVIEW_MISSING]):
         print("  " + line)
     print("  python: %d.%d" % (sys.version_info[0], sys.version_info[1]))
     print("  files measured: %d" % len(paths))
@@ -688,15 +686,16 @@ def run_staged(root: Path, config: dict) -> int:
                       "against the version already on HEAD" % CONFIG_NAME)
     blocking = secret_problems(root, "--cached") + baseline_problems(root, config, "HEAD", ":", ("--cached",))
     header_notes, headers = header_report(root, "HEAD", ("--cached",), ":")
-    blocking += headers
+    extra_notes, extra = optional_checks(root, "HEAD", ":", ("--cached",))
+    blocking += headers + extra
     paths = staged_files(root, config)
     if paths:
         baseline = load_baseline_staged(root, config)
         found, _ = run_checks(root, paths, ":", baseline, config, "HEAD")
-        notes += found.notes + header_notes
+        notes += found.notes + header_notes + extra_notes
         blocking += found.problems
     elif not blocking:
-        for note in header_notes:
+        for note in header_notes + extra_notes:
             print("note: " + note)
         print("themis: 0 staged source files; nothing to check")
         return 0
@@ -724,9 +723,46 @@ def run_range(root: Path, config: dict, range_arg: str) -> int:
     baseline = load_baseline(root, config, ref=b)
     found, _ = run_checks(root, paths, b, baseline, config, a)
     header_notes, headers = header_report(root, a, (span,), b)
-    notes += found.notes + header_notes
-    blocking += found.problems + headers
+    extra_notes, extra = optional_checks(root, a, b, (span,))
+    notes += found.notes + header_notes + extra_notes
+    blocking += found.problems + headers + extra
     return _report(notes, blocking, "themis: pass, %d file(s) checked at %s" % (len(paths), b))
+
+def run_rebaseline(root: Path, config: dict) -> int:
+    print("themis: rebaseline only lowers the baseline: it drops entries for files that shrank "
+          "under a limit or were deleted, and refuses to raise any number.")
+    paths = tree_files(root, config)
+    baseline = load_baseline(root, config)
+    _, measures = run_checks(root, paths, None, baseline, config)
+    fresh = fresh_baseline(measures)
+    if review is None and config.get("docs") is not None:
+        print("themis: refusing — " + REVIEW_MISSING)
+        return 1
+    docs, shown = review.docs_baseline(root, _git, config) if review else (None, [])
+    if docs is None and config.get("docs") is not None:
+        print("themis: refusing — " + "; ".join(shown))
+        return 1
+    committed = _committed_baseline_text(root, config)
+    if committed is not None:
+        raised = baseline_ratchet_violations(committed, json.dumps(fresh))
+        raised += lang_problems(root, config, "HEAD", committed, json.dumps(fresh))
+        raised += review.docs_raised(committed, docs) if docs else []
+        if raised:
+            print("themis: refusing — rebaseline would raise the baseline, which only goes down. "
+                  "Split the file instead:")
+            for line in raised:
+                print("  " + line)
+            return 1
+    if docs is not None:
+        fresh["docs"] = docs
+        print("\n".join("themis: " + line for line in shown))
+    try:
+        write_baseline(root, config, fresh)
+    except PathEscapesRepo as exc:
+        print("themis: refusing to write the baseline — %s" % exc)
+        return 1
+    print("themis: baseline written to %s" % config["baseline_path"])
+    return 0
 
 def main(argv: Optional[List[str]] = None) -> int:
     # a path this process cannot even print (an unmappable console code
@@ -750,29 +786,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     if args.command == "gate":
         return gate.run(root, args, safe_rel_path)
     if args.command == "rebaseline":
-        print("themis: rebaseline only lowers the baseline: it drops entries for files that shrank "
-              "under a limit or were deleted, and refuses to raise any number.")
-        paths = tree_files(root, config)
-        baseline = load_baseline(root, config)
-        _, measures = run_checks(root, paths, None, baseline, config)
-        fresh = fresh_baseline(measures)
-        committed = _committed_baseline_text(root, config)
-        if committed is not None:
-            raised = baseline_ratchet_violations(committed, json.dumps(fresh))
-            raised += lang_problems(root, config, "HEAD", committed, json.dumps(fresh))
-            if raised:
-                print("themis: refusing — rebaseline would raise the baseline, which only goes down. "
-                      "Split the file instead:")
-                for line in raised:
-                    print("  " + line)
-                return 1
-        try:
-            write_baseline(root, config, fresh)
-        except PathEscapesRepo as exc:
-            print("themis: refusing to write the baseline — %s" % exc)
-            return 1
-        print("themis: baseline written to %s" % config["baseline_path"])
-        return 0
+        return run_rebaseline(root, config)
     if args.range:
         return run_range(root, config, args.range)
     if args.staged:

@@ -50,6 +50,9 @@ Scan = _scan_module.Scan
 legacy_comments = _scan_module.legacy_comments
 python_comments = _scan_module.python_comments
 leading_blocks = _scan_module.leading_blocks
+SECRET_PATTERNS = _scan_module.SECRET_PATTERNS
+ALLOW_MARKER = _scan_module.ALLOW_MARKER
+secret_hits = _scan_module.secret_hits
 
 _FAMILY = {
     ".rs": "rust", ".go": "go", ".swift": "swift", ".kt": "kotlin", ".kts": "kotlin",

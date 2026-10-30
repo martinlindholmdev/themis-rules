@@ -9,8 +9,8 @@ has no release SLA; expect an acknowledgement, not a guaranteed fix date.
 
 ## What Themis does
 
-- `tools/themis.py`, `tools/themis_lang.py`, `tools/themis_scan.py` and
-  `tools/themis_gate.py` are standard-library Python only: no network access,
+- `tools/themis.py`, `tools/themis_lang.py`, `tools/themis_scan.py`,
+  `tools/themis_gate.py` and the optional `tools/themis_review.py` are standard-library Python only: no network access,
   no third-party dependencies. `check` and `status` write nothing;
   `rebaseline` writes the baseline and can only lower it. `gate` writes a
   receipt under `.git/themis/`; `gate --record` and `gate --lower` write
@@ -33,7 +33,9 @@ has no release SLA; expect an acknowledgement, not a guaranteed fix date.
   existing, new or renamed file is reported and the file is measured. The
   secret scan never skips a file.
 - A new or raised `lang` baseline entry is accepted only when the base
-  commit's own version of the file measures at least that number.
+  commit's own version of the file measures at least that number. A new or
+  raised `docs` entry needs the same, and must also be at least what the
+  change's own tree measures.
 - `install.py` never executes code from the repository it installs into:
   not an old checker it replaces, not a hook file it edits around, not the
   test command it writes into `themis.json` (it reads root-level file names

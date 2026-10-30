@@ -152,6 +152,45 @@ reported by file and line; the matched text is never printed. The patterns
 are fixed in the checker. This is a pattern match, not a complete secret
 scanner.
 
+## Documentation budget
+
+Off by default. An owner turns it on with a `docs` key in `themis.json`, and
+the checks live in the optional `tools/themis_review.py`:
+
+```json
+"docs": {"caps": {"AGENTS.md": 300, "CLAUDE.md": 200}, "total": 600,
+         "check_links": false, "link_globs": ["*.md"]}
+```
+
+With no `docs` key there is no cap, no total and no link check, and `status`
+prints each of `AGENTS.md` and `CLAUDE.md` with its counted lines so an owner
+can pick a number first. With the key, a missing sub-key takes the value
+shown above; `caps` given at all replaces the default list.
+
+- Counted lines exclude the vendored rules block between the
+  `<!-- themis vX begin -->` and `end` markers. A begin marker with no end
+  marker excludes nothing.
+- A named document over its cap, or the sum over `total`, fails the commit or
+  range unless a baseline entry allows it. An `@relative/path.md` line (outside
+  a fence) in a named document adds that tracked file's counted lines to the
+  total once, one level deep and only if the file is not itself named.
+- Caps come from the base commit's `themis.json`, so raising one in the same
+  commit does nothing.
+- With `check_links` true, every tracked file matching `link_globs` is read
+  from the index (`--staged`) or the tree at B (`--range`). Inline links,
+  images and reference definitions outside fenced code and inline code count.
+  Any link with a scheme (`https:`, `mailto:`), a leading `//` or only a
+  `#fragment` is ignored; the fragment and query are stripped (headings are not
+  checked); a link is resolved from the linking file's folder, or from the
+  root when it starts with `/`, and must name a tracked file or a folder that
+  holds tracked files. A link that leaves the repository is dead. A removed
+  target is found because every matching file is checked, not only changed ones.
+- The checks run in `check --staged` and `check --range`. Plain `check` does
+  not run them.
+
+Not checked, and not claimed: orphan files, duplicated facts, whether prose is
+stale, links written as HTML, and heading anchors.
+
 ## Acceptance gate (rule 13)
 
 Rule 13 says the tests ran and passed. When `themis.json` has a `test` section
@@ -359,6 +398,7 @@ after it is committed. Fields:
   integer, is ignored. A baseline entry still allows what it allows.
 - `test`: the acceptance gate's command, runner and floor, and
   `pre_push_branches`, `docs_only`, `docs_quick` and `quick`; see above.
+- `docs`: the documentation budget; see above. Absent means off.
 - `extra_history_words`, `extra_extensions`, `baseline_path` and
   `decision_log`.
 
@@ -380,17 +420,57 @@ tree is not seeded and the plan says so. The older sections are lowered and
 never raised, and old history entries for the seven languages are removed.
 Re-running `install` on a current repository does not touch the baseline.
 
+## The `docs` baseline section
+
+Documents already over a cap and files that already have dead links are
+recorded in the baseline's `docs` section:
+
+```json
+"docs": {"lines": {"AGENTS.md": 412, "<total>": 700}, "dead_links": {"README.md": 2}}
+```
+
+An entry allows what it records and no more, and may only shrink. Adoption has
+an explicit path, mirroring the `lang` section:
+
+- A new or raised entry is accepted only when the base commit's own tree,
+  measured with the current code and the settings the change proposes, gives at
+  least that number for that path or count. An entry for a path the base commit
+  does not have, or above the base measurement, is refused with a message
+  naming it. Lowering and removing always pass.
+- A second condition closes the adoption commit itself: every new or raised
+  entry must also be at least what the change's own tree measures (the index
+  for `--staged`, the tree at B for `--range`). So head <= entry <= base: a
+  document or a file's dead links may not grow in the commit that records its
+  allowance. This applies to entries the commit adds or raises, whether or not
+  the base config already has a `docs` key; later commits are held by the
+  normal cap and entry check.
+- To adopt: in one commit, add the `docs` key to `themis.json`, run
+  `python3 tools/themis.py rebaseline` and commit both. `rebaseline` seeds the
+  entries from HEAD's committed content, never the working tree, for every
+  document over its cap, the total when over, and every file with dead links,
+  and prints them. It lowers entries and never raises one. That commit is
+  judged by the base config (no `docs` key yet); enforcement starts with the
+  next commit. `install` and an upgrade seed nothing: opting in stays explicit.
+
 ## The vendored files and `status`
 
-Four standard-library Python files are copied into the repository:
+Four standard-library Python files are copied into the repository, with a
+fifth that is optional:
 `tools/themis.py` (git, configuration, reporting), `tools/themis_lang.py`
 (function length, comments and history matching for the seven languages, and
 the header reader), `tools/themis_scan.py` (the scanner) and
 `tools/themis_gate.py` (the acceptance gate, the git runner and the hook
 lines `status` prints). They must sit side by side; a missing one ends the
-run with one line. The 800-line limit applies to the checker itself, which is
-why it is four files. The four tools files are excluded from every measured
-set.
+run with one line. The optional fifth, `tools/themis_review.py`, holds the
+documentation budget and the test tripwire; `gate` never loads it. When it is
+absent, a repository that has not turned those features on sees only a
+`status` line saying so, and one that has (`docs`, `tamper.mode` "block", a
+changed `docs` baseline section) fails closed with the same message, so
+deleting the file never switches a check off. Because CI copies the checker
+files from the base commit, an older `themis-gate.yml` that names only the
+four old files keeps working. The 800-line limit applies to the checker
+itself, which is why it is split across files. The checker files are excluded
+from every measured set.
 
 `status` prints facts it can see and nothing it cannot:
 
