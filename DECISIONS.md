@@ -278,3 +278,6 @@ there. `tools/themis.py` and `install.py` never raise this file, and
   settings when it has any; the settings a change proposes are used only for
   the adoption commit, so a same-change edit of the named documents cannot
   inflate an allowance that is then spent against the base set.
+
+- v3.6.0 (2026-10-30): release of the test.docs_quick quick tier, the opt-in documentation budget and the opt-in test tamper tripwire; the optional `tools/themis_review.py` is new, so installed repositories update with `install.py install`, and an owner-owned `themis-gate.yml` needs no change.
+- The three v3.6 features were planned and reviewed by a different model family before they were built, and the built diff was reviewed by that family again.

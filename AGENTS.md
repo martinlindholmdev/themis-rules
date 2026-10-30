@@ -20,7 +20,7 @@ Layout:
   never vendored.
 - `tests/`: the test suite.
 
-<!-- themis v3.5.4 begin -->
+<!-- themis v3.6.0 begin -->
 # Agent rules
 
 Agents write this code; the owner reads results, not code. [check] marks
@@ -84,7 +84,7 @@ Work
     never saw this conversation.
 
 Start with `python3 tools/themis.py status`: it lists what is on.
-<!-- themis v3.5.4 end -->
+<!-- themis v3.6.0 end -->
 
 ## Standing permissions
 - New libraries without asking: no
