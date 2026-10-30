@@ -17,6 +17,8 @@ import unittest
 
 from review_repo import Repo, TOOLS
 
+SECRET = "sk-" + "abcdef0123456789abcdQX"
+SWAP = {"docs": {"caps": {"OTHER.md": 100}, "total": 20}, "version": "v3.6.0"}
 LINES = lambda n, word="line": "".join("%s %d\n" % (word, i) for i in range(n))
 BLOCK = "<!-- themis v3.6.0 begin -->\n" + LINES(50, "rule") + "<!-- themis v3.6.0 end -->\n"
 CAPS = {"docs": {"caps": {"AGENTS.md": 10}, "total": 600}}
@@ -39,6 +41,14 @@ ROWS = [
      {"AGENTS.md": "```\n[x](missing.md)\n```\n`[y](gone.md)`\n"}, [], True, ""),
     ("external and fragment-only links are ignored", LINKS, {},
      {"AGENTS.md": "[a](https://example.com/x) [b](mailto:a@example.com) [c](#top)\n"}, [], True, ""),
+    ("a credential-bearing dead link that is new is not printed", LINKS, {},
+     {"AGENTS.md": "[x](missing.md?token=%s)\n" % SECRET}, [], False, "1 dead local link"),
+    ("a credential-bearing dead link that already existed is not printed", LINKS,
+     {"AGENTS.md": "[x](missing.md#%s)\n" % SECRET}, {"notes.txt": "unrelated\n"}, [], False, "1 dead local link"),
+    ("an allowance validated under proposed settings cannot be spent against the base settings",
+     {"docs": {"caps": {"AGENTS.md": 100}, "total": 20}}, {"AGENTS.md": LINES(10), "OTHER.md": LINES(100)},
+     {"AGENTS.md": LINES(50), "themis.json": json.dumps(SWAP),
+      "themis-baseline.json": json.dumps({"docs": {"lines": {"<total>": 100}}})}, [], False, "above the 10"),
     ("a link to a file deleted in the same change", LINKS, {"docs/a.md": "a\n", "AGENTS.md": "[x](docs/a.md)\n"},
      {}, ["docs/a.md"], False, "dead local link"),
 ]
@@ -68,6 +78,8 @@ class DocsBudget(unittest.TestCase):
                 for done in (staged, ranged):
                     self.assertEqual(done.returncode, 0 if ok else 1, repo.out(done))
                     self.assertIn(phrase, repo.out(done))
+                    self.assertFalse([w for w in (SECRET[i:i + 8] for i in range(len(SECRET) - 7))
+                                      if w in repo.out(done)], repo.out(done))
 
     def adoption_repo(self):
         repo = self.repo({})

@@ -272,3 +272,9 @@ there. `tools/themis.py` and `install.py` never raise this file, and
   and SECURITY.md promises matched text is never printed. The `allow` list is
   read from the base config only, so neither a same-commit edit nor a
   decision-log line excuses a change. It lists and does not judge adequacy.
+- A dead link is reported by file and line, never by its target, because a
+  link query or fragment may hold a credential and a diagnostic must not copy
+  it into a log. A `docs` allowance is measured under the base commit's `docs`
+  settings when it has any; the settings a change proposes are used only for
+  the adoption commit, so a same-change edit of the named documents cannot
+  inflate an allowance that is then spent against the base set.

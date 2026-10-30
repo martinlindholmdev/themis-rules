@@ -231,7 +231,9 @@ shown above; `caps` given at all replaces the default list.
   `#fragment` is ignored; the fragment and query are stripped (headings are not
   checked); a link is resolved from the linking file's folder, or from the
   root when it starts with `/`, and must name a tracked file or a folder that
-  holds tracked files. A link that leaves the repository is dead. A removed
+  holds tracked files. A link that leaves the repository is dead. A dead link
+  is reported by file and line only, never by its target, since a link may
+  carry a credential. A removed
   target is found because every matching file is checked, not only changed ones.
 - The checks run in `check --staged` and `check --range`. Plain `check` does
   not run them.
@@ -483,7 +485,10 @@ an explicit path, mirroring the `lang` section:
 
 - A new or raised entry is accepted only when the base commit's own tree,
   measured with the current code and the settings the change proposes, gives at
-  least that number for that path or count. An entry for a path the base commit
+  least that number for that path or count, measured under the base commit's
+  `docs` settings when it has any (the settings a change proposes apply from the
+  next change, so a new document is named in one commit and recorded in the
+  next), and under the proposed settings only for the adoption commit. An entry for a path the base commit
   does not have, or above the base measurement, is refused with a message
   naming it. Lowering and removing always pass.
 - A second condition closes the adoption commit itself: every new or raised

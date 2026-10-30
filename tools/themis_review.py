@@ -266,8 +266,9 @@ def docs_problems(measured: Measured, settings: dict, entries: dict) -> List[str
     for path, dead in sorted(measured.dead.items()):
         allowed_dead = entries.get("dead_links", {}).get(path, 0)
         if len(dead) > allowed_dead:
-            shown = ", ".join("line %d %s" % (n, _safe(t)[:60]) for n, t in dead[:3])
-            problems.append("%s: %d dead local link(s) (baseline allows %d), e.g. %s. Fix or remove them."
+            shown = ", ".join(str(n) for n, _ in dead[:5])
+            problems.append("%s: %d dead local link(s) (baseline allows %d) at line(s) %s; the targets are not "
+                            "printed, since a link may carry a credential. Fix or remove them."
                             % (_safe(path), len(dead), allowed_dead, shown))
     return problems
 
@@ -387,8 +388,10 @@ def _baseline_text(root: Path, git: Git, config: dict, refs: Tuple[str, ...]) ->
 
 def _docs_run(root: Path, git: Git, base: dict, rev: str, ref: str, diff_args: Tuple[str, ...]) -> List[str]:
     """The documentation checks for one run: caps, total and dead links under
-    the base config, and the ratchet on a changed baseline under the settings
-    the change proposes, since an adoption commit has no `docs` key at its base."""
+    the base config, and the ratchet on a changed baseline measured under that
+    same base config, so an allowance is judged against the document set it is
+    spent on. Only an adoption commit, which has no `docs` key at its base, is
+    measured under the settings it proposes."""
     problems: List[str] = []
     settings, bad = docs_settings(base)
     problems += ["themis.json at %s: %s" % (rev[:12], p) for p in bad]
@@ -402,10 +405,11 @@ def _docs_run(root: Path, git: Git, base: dict, rev: str, ref: str, diff_args: T
         proposed_settings = docs_settings(json.loads(proposed) if proposed else {})[0]
     except ValueError:
         proposed_settings = None
+    measured_under = settings or proposed_settings
     old_text, new_text = _text_at(root, git, rev, base["baseline_path"]) or "{}", _text_at(
         root, git, ref, base["baseline_path"]) or "{}"
     sides = [Tree(root, git, r) for r in (rev, ref)]
-    measured = [measure(t, proposed_settings) if proposed_settings else None for t in sides]
+    measured = [measure(t, measured_under) if measured_under else None for t in sides]
 
     def side(index: int) -> Callable[[str, str], Optional[int]]:
         return lambda section, key: (None if measured[index] is None
