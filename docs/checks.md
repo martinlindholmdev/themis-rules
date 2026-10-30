@@ -276,10 +276,27 @@ regular file (mode 100644 or 100755, the same on both sides, read from the
 trees themselves) matching a glob. A gitlink, symlink, mode change, an
 unlisted path, a git error or no receipt runs the full gate. The receipt also
 carries a hash of every setting that affects judgment (command, patterns,
-floor, skip ceiling, timeout, `ignore_paths`, protected branches, the list),
-and a changed hash, or `themis.json` itself among the changed paths, runs the
+floor, skip ceiling, timeout, `ignore_paths`, protected branches, the list,
+and `quick` with the `docs_quick` list when that is set), and a changed hash, or `themis.json` itself among the changed paths, runs the
 full gate, so a raised floor is never skipped past. The list comes from the
 destination's settings, like the rest. CI ignores the list.
+
+Documents that tests read. `test.docs_quick` is a list of globs with the
+same syntax and fail-closed rules as `docs_only`, for documents a test reads
+(a size test over an instruction file, say), which therefore cannot go in
+`docs_only`. It needs `test.quick`; without it the configuration is refused.
+After `docs_only` finds no reuse, a gated push runs the quick tier when a
+receipt written under the same command and settings exists and every path
+changed since its tree is a regular file matching a `docs_quick` glob: it
+runs `test.quick` in place of the suite and judges its exit status and
+timeout only, since a subset counts fewer tests. A pass prints `PASS (quick
+tier: only docs_quick files changed since the full run on tree <sha>;
+test.quick ran, the suite did not)` and writes no receipt, so the next push is
+still measured against the last full run. An unlisted path, `themis.json`
+among the changes, a changed setting, no receipt or any git error runs the
+full gate. A path in both lists is a `docs_only` path. CI ignores the list and
+always runs the full suite; `status` prints it. The tier proves nothing about
+whether the quick command is adequate.
 
 Install writes the pre-push hook only when no CI runs the gate (no GitHub
 remote, or no workflow running `gate`, counting the `themis-gate.yml` the same
@@ -312,9 +329,10 @@ directory. To block in Codex, use its `Stop` hook (`hooks.json` or `[hooks]` in
 `config.toml`; exit 2 with a message on stderr continues the turn; hooks must
 be trusted through `/hooks`; see https://developers.openai.com/codex/hooks.md);
 Themis has not tested that. The quick command is never the gate and proves
-nothing about a commit.
+nothing about a commit, except in the pre-push quick tier above.
 
-Not covered: edits to the tests themselves, `pytest.ini`, `conftest.py`, skip
+Not covered: whether `test.quick` is an adequate stand-in for the suite on the
+files `docs_quick` names (the owner's judgment), edits to the tests themselves, `pytest.ini`, `conftest.py`, skip
 markers, discovery or coverage exclusions and the workflows (only the command,
 patterns and floor are protected, so review those changes), a hostile test
 command, sandboxing, coverage or mutation gates, a check that the branch
@@ -340,7 +358,7 @@ after it is committed. Fields:
   that can only tighten. A value above the hard limit, or not a positive
   integer, is ignored. A baseline entry still allows what it allows.
 - `test`: the acceptance gate's command, runner and floor, and
-  `pre_push_branches`, `docs_only` and `quick`; see above.
+  `pre_push_branches`, `docs_only`, `docs_quick` and `quick`; see above.
 - `extra_history_words`, `extra_extensions`, `baseline_path` and
   `decision_log`.
 

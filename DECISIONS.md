@@ -240,3 +240,11 @@ there. `tools/themis.py` and `install.py` never raise this file, and
   baseline included, so an upgrade note can be true. No version bump.
 
 - v3.5.4 (2026-10-13): release of the upgrade-install fixes above (edited pre-commit kept, nothing added unasked on an upgrade, every written path named).
+
+- `test.docs_quick` (v3.6): a pre-push list of globs for documents that tests
+  read, so a push of only those runs `test.quick` in place of the suite. It
+  needs a receipt from a full run under the same settings, judges exit status
+  and timeout only, writes no receipt, and never applies in CI, which runs the
+  full suite. `docs_only` wins when a path is in both lists. The checker's
+  `settings` hash gains `quick` and the list only when the list is set, so
+  existing receipts stay valid.

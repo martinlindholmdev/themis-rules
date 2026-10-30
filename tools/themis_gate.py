@@ -20,7 +20,9 @@ a failure, never a zero; a pass names the commit and tree it covers; the
 local receipt in .git is evidence for a reader and a skip-the-rerun cache,
 never read by CI; --pre-push gates only a push to a protected branch and
 reuses the receipt across a documents-only change that leaves themis.json and
-every judged setting as the receipt saw them; writes only that receipt,
+every judged setting as the receipt saw them, or runs test.quick in place of
+the suite when only test.docs_quick files changed (and writes no receipt);
+writes only that receipt,
 themis.json under --record and --lower, and the decision log under --lower.
 Never change without a decision: the themis.json "test" key names and their
 meaning, the runner presets, the PASS line, and the rule that the base
@@ -185,6 +187,7 @@ class GateConfig(NamedTuple):
     branches: List[str]
     docs_only: Optional[List[str]]
     quick: Optional[List[str]]
+    docs_quick: Optional[List[str]] = None
 
 
 def _pattern(value: object, name: str, problems: List[str]) -> Optional["re.Pattern[str]"]:
@@ -258,13 +261,16 @@ def parse_test_config(raw: object) -> Tuple[Optional[GateConfig], List[str]]:
     quick = _strings(raw, "quick", None, problems)
     if quick == []:
         problems.append("test.quick must name a command (an argv list) when present")
+    docs_quick = _strings(raw, "docs_quick", None, problems)
+    if docs_quick is not None and not quick:
+        problems.append("test.docs_quick needs test.quick, the command it runs")
     floor = _whole(raw, "min_tests", 1, 1, 10 ** 9, problems)
     ceiling = _whole(raw, "max_skipped", 0, 0, 10 ** 9, problems)
     timeout = _whole(raw, "timeout", 1800, 1, 86400, problems)
     if problems or count is None:
         return None, problems
     return GateConfig(list(command), count, skip, floor, ceiling, timeout, list(ignore),
-                      branches, docs_only, quick), []
+                      branches, docs_only, quick, docs_quick), []
 
 
 def raw_test_at(root: Path, rev: str) -> Tuple[object, Optional[str]]:
@@ -330,10 +336,12 @@ def command_hash(command: Optional[list]) -> str:
 def settings_hash(cfg: "GateConfig") -> str:
     """A short hash of every setting that changes what the gate judges: the
     command, both patterns, floor, skip ceiling, timeout, ignore_paths,
-    protected branches and the docs_only list. test.quick is left out, since
-    the gate never runs it."""
-    return command_hash([cfg.command, cfg.count.pattern, cfg.skip.pattern if cfg.skip else None,
-                         cfg.min_tests, cfg.max_skipped, cfg.timeout, cfg.ignore, cfg.branches, cfg.docs_only])
+    protected branches and the docs_only list; test.quick and the docs_quick
+    list join it only when docs_quick is set, so receipts written without
+    that key stay valid."""
+    parts = [cfg.command, cfg.count.pattern, cfg.skip.pattern if cfg.skip else None,
+             cfg.min_tests, cfg.max_skipped, cfg.timeout, cfg.ignore, cfg.branches, cfg.docs_only]
+    return command_hash(parts + ([cfg.docs_quick, cfg.quick] if cfg.docs_quick else []))
 
 
 class Ran(NamedTuple):
@@ -444,15 +452,13 @@ def _modes(root: Path, tree: str) -> dict:
     return {entry.split("\t", 1)[1]: entry.split(" ", 1)[0] for entry in out.split("\0") if "\t" in entry}
 
 
-def _docs_only_receipt(root: Path, cfg: GateConfig) -> Optional[dict]:
-    """The receipt, when it was written under these settings (the command and
-    docs_only list included) and every path changed since its tree is a
-    regular file, of the same mode on both sides, matching a docs_only glob
-    and not themis.json. A gitlink, symlink, mode change or any git error
-    means no reuse."""
+def _only_changed(root: Path, cfg: GateConfig, globs: Optional[List[str]]) -> Optional[dict]:
+    """The receipt, when it was written under these settings and every path
+    changed since its tree is a regular file, of the same mode on both sides,
+    matching one of `globs` and not themis.json. A gitlink, symlink, mode
+    change or any git error means no reuse."""
     receipt = read_receipt(root)
-    if (not cfg.docs_only or not receipt or receipt.get("command") != command_hash(cfg.command)
-            or receipt.get("docs_only") != command_hash(cfg.docs_only)
+    if (not globs or not receipt or receipt.get("command") != command_hash(cfg.command)
             or receipt.get("settings") != settings_hash(cfg)):
         return None
     old = receipt.get("tree")
@@ -472,9 +478,40 @@ def _docs_only_receipt(root: Path, cfg: GateConfig) -> Optional[dict]:
         modes = {before.get(path), after.get(path)} - {None}
         if len(modes) != 1 or not modes <= {"100644", "100755"}:
             return None
-        if not any(fnmatch.fnmatchcase(path, glob) for glob in cfg.docs_only):
+        if not any(fnmatch.fnmatchcase(path, glob) for glob in globs):
             return None
     return receipt
+
+
+def _docs_only_receipt(root: Path, cfg: GateConfig) -> Optional[dict]:
+    """The receipt for a documents-only reuse: also written under the same
+    docs_only list."""
+    receipt = _only_changed(root, cfg, cfg.docs_only)
+    return receipt if receipt and receipt.get("docs_only") == command_hash(cfg.docs_only) else None
+
+
+def _quick_tier(root: Path, cfg: GateConfig, commit: str, tree: str) -> Optional[int]:
+    """The exit status of a quick-tier pass, or None when the full gate must
+    run: needs test.docs_quick and test.quick, and a receipt of a full run
+    under these settings with only docs_quick files changed since. Runs
+    test.quick in place of the suite and judges its exit status and timeout
+    only, since a subset counts fewer tests; writes no receipt, so the next
+    push is still measured against the last full run."""
+    receipt = _only_changed(root, cfg, cfg.docs_quick) if cfg.quick else None
+    if receipt is None:
+        return None
+    result = run_command(root, cfg._replace(command=cfg.quick))
+    if result.error:
+        return _fail([result.error])
+    problems = (["the test.quick command timed out after %d seconds" % cfg.timeout] if result.timed_out else
+                [] if result.status == 0 else ["the test.quick command exited with status %s" % result.status])
+    problems += tree_problems(root, commit, cfg.ignore)
+    if problems:
+        return _fail(problems, result.output)
+    print(_pass_line(commit, tree, cfg, receipt.get("tests", 0), receipt.get("skipped"),
+                     " (quick tier: only docs_quick files changed since the full run on tree %s; "
+                     "test.quick ran, the suite did not)" % receipt.get("tree", "")[:12]))
+    return 0
 
 
 # ------------------------------------------------------------------ the gate
@@ -539,6 +576,9 @@ def execute(root: Path, cfg_rev: str, target: str, local: bool, reuse: bool,
     if receipt:
         print(_pass_line(commit, tree, cfg, receipt.get("tests", 0), receipt.get("skipped"), note))
         return 0, cfg, int(receipt.get("tests", 0))
+    quick = _quick_tier(root, cfg, commit, tree) if docs else None
+    if quick is not None:
+        return quick, cfg, 0
     result = run_command(root, cfg)
     if result.error:
         return _fail([result.error]), cfg, 0
@@ -750,4 +790,7 @@ def status_lines(root: Path, raw_test: object) -> List[str]:
     lines.append("last local gate: tree matches HEAD, %s tests" % receipt.get("tests") if receipt
                  else "last local gate: none or stale")
     lines.append(_pre_push_line(root))
+    if cfg.docs_quick:
+        lines.append("quick tier: a protected-branch push runs test.quick, not the suite, when only %s changed "
+                     "since the last full run" % ", ".join(_safe(g) for g in cfg.docs_quick))
     return lines

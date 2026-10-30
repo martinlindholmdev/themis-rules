@@ -50,10 +50,12 @@ to add the toolchain steps their tests need to `themis-gate.yml`, to make the
 `themis-gate.yml` is written once and never overwritten: a re-run prints how
 this release's template differs and leaves it.
 
-Two optional keys under `test` are set by the owner by hand, never by install:
+Three optional keys under `test` are set by the owner by hand, never by install:
 `docs_only`, a list of globs for documents no test reads, so a push of only
-those to a protected branch reuses the last local run; and `quick`, an argv
-list for a fast subset of the tests. When `quick` is set, install prints a
+those to a protected branch reuses the last local run; `quick`, an argv
+list for a fast subset of the tests; and `docs_quick`, a list of globs for
+documents that tests read, so a push of only those runs `quick` in place of the
+suite (it needs `quick`; CI always runs the suite). When `quick` is set, install prints a
 Claude Code `Stop` hook and a Codex `notify` line that run it when an agent
 finishes a turn, and writes neither. docs/checks.md has the details.
 
