@@ -8,22 +8,19 @@ Entry points: run() for `themis.py gate` (plain, --range A...B, --reuse,
 --pre-push, --record, --lower N --reason TEXT), add_arguments(),
 parse_test_config(), runs_gate_in_ci(), status_lines(), git(), hooks_dir(),
 hook_status(), safe_rel_path().
-Invariants: standard library only, python3 3.9+, no network access; the
-command is an argv list run without a shell and with no stdin; its
-settings come from the BASE commit's themis.json (A for --range, the
-destination branch's current commit for --pre-push, HEAD otherwise), so a
-change cannot edit its own gate; the tracked working tree
-and index must equal the tree of the commit being gated before the run and
-again after it, except under the owner's ignore_paths; stdout and stderr are
-merged and ANSI codes stripped before the output is read; a missing count is
-a failure, never a zero; a pass names the commit and tree it covers; the
-local receipt in .git is evidence for a reader and a skip-the-rerun cache,
-never read by CI; --pre-push gates only a push to a protected branch and
-reuses the receipt across a documents-only change that leaves themis.json and
-every judged setting as the receipt saw them, or runs test.quick in place of
-the suite when only test.docs_quick files changed (and writes no receipt);
-writes only that receipt,
-themis.json under --record and --lower, and the decision log under --lower.
+Invariants: standard library only, python3 3.9+, no network access; the command is an argv list run
+without a shell and with no stdin and without the variables git sets to locate a repository (`git
+rev-parse --local-env-vars`), so a git command it runs elsewhere finds its own; its settings come
+from the BASE commit's themis.json (A for --range, the destination branch's current commit for
+--pre-push, HEAD otherwise), so a change cannot edit its own gate; the tracked working tree and
+index must equal the tree of the commit being gated before the run and again after it, except under
+the owner's ignore_paths; stdout and stderr are merged and ANSI codes stripped before the output is
+read; a missing count is a failure, never a zero; a pass names the commit and tree it covers; the
+local receipt in .git is evidence for a reader and a skip-the-rerun cache, never read by CI;
+--pre-push gates only a push to a protected branch and reuses the receipt across a documents-only
+change that leaves themis.json and every judged setting as the receipt saw them, or runs test.quick
+in place of the suite when only test.docs_quick files changed (and writes no receipt); writes only
+that receipt, themis.json under --record and --lower, and the decision log under --lower.
 Never change without a decision: the themis.json "test" key names and their
 meaning, the runner presets, the PASS line, and the rule that the base
 commit's settings and the committed tree decide.
@@ -372,9 +369,14 @@ def run_command(root: Path, cfg: GateConfig) -> Ran:
         return Ran("", None, False, "command not found: %s" % _safe(first))
     argv = [exe] + cfg.command[1:]
     group = {"start_new_session": True} if os.name != "nt" else {}
+    try:  # git's own list of the variables that locate a repository (githooks(5))
+        local = set(git(root, "rev-parse", "--local-env-vars").split())
+    except (OSError, subprocess.CalledProcessError):
+        return Ran("", None, False, "cannot read git's repository variables to clear")
+    env = {k: v for k, v in os.environ.items() if k not in local}
     try:
         proc = subprocess.Popen(argv, cwd=str(root), stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
-                                stderr=subprocess.STDOUT, **group)
+                                stderr=subprocess.STDOUT, env=env, **group)
     except OSError as exc:
         return Ran("", None, False, "cannot run %s (%s)" % (_safe(first), exc.strerror or "error"))
     try:

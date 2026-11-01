@@ -13,6 +13,7 @@ each test asserts, which are what a reader of a CI log sees.
 
 import importlib.util
 import json
+import os
 import re
 import subprocess
 import sys
@@ -73,9 +74,9 @@ class GateCase(unittest.TestCase):
         sh(repo, "commit", "-q", "-m", message, "--no-verify")
         return sh(repo, "rev-parse", "HEAD")
 
-    def gate(self, repo, *args):
+    def gate(self, repo, *args, env=None):
         return subprocess.run([sys.executable, str(repo / "tools" / "themis.py"), "gate"] + list(args),
-                              cwd=str(repo), capture_output=True, text=True)
+                              cwd=str(repo), capture_output=True, text=True, env=env)
 
     def counting_repo(self):
         """A test command that leaves a mark in ran.log each time it runs."""
@@ -140,6 +141,22 @@ class RunTests(GateCase):
         gone = self.gate(self.repo(dict(UNITTEST, command=["no-such-program-themis"])))
         self.assertEqual(gone.returncode, 1)
         self.assertIn("command not found: no-such-program-themis", gone.stdout)
+
+    def test_the_command_does_not_inherit_the_variables_git_gives_a_hook(self):
+        scratch = tempfile.TemporaryDirectory()
+        self.addCleanup(scratch.cleanup)
+        script = ("import subprocess, sys\n"
+                  "for args in (['init', '-q'], ['config', 'user.name', 'inner']):\n"
+                  "    subprocess.check_call(['git', '-C', %r] + args)\n"
+                  "sys.exit(subprocess.call([sys.executable, '-m', 'unittest']))\n" % scratch.name)
+        repo = self.repo(dict(UNITTEST, command=[sys.executable, "run_tests.py"]))
+        self.write(repo, "run_tests.py", script)
+        self.commit(repo, "wrapper")
+        done = self.gate(repo, env=dict(os.environ, GIT_DIR=str(repo / ".git")))
+        self.assertEqual(done.returncode, 0, done.stdout)
+        self.assertEqual(sh(repo, "config", "user.name"), "t")
+        self.assertEqual(sh(repo, "config", "core.bare"), "false")
+        self.assertEqual(sh(scratch.name, "config", "user.name"), "inner")
 
     @unittest.skipIf(sys.platform == "win32", "the process-group kill is POSIX; Windows uses taskkill /T")
     def test_a_timeout_ends_the_processes_the_command_started_too(self):

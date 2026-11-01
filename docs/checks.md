@@ -260,8 +260,13 @@ install reads root-level file names to print a suggestion and runs nothing.
   repository root. A program that is not found, a non-zero exit and a timeout
   each fail. On a timeout the command's whole process group is killed (on
   Windows `taskkill /T`, not exercised by the tests); a process that starts
-  its own session is not reached. A shell operator in `--test-command` is
-  refused; put pipes and `&&` in a script and name the script.
+  its own session is not reached. The command runs without the variables git
+  exports to a hook to locate the repository (`GIT_DIR`, `GIT_INDEX_FILE` and
+  the rest of `git rev-parse --local-env-vars`), so a test that runs git in a
+  scratch directory cannot reach the repository being pushed; if git's list
+  cannot be read the gate fails instead of running unisolated. A shell
+  operator in `--test-command` is refused; put pipes and `&&` in a script and
+  name the script.
 - `runner`: `unittest`, `pytest` or `cargo`, which fixes how the output is
   read (below). `count_pattern` and `skip_pattern` are regular expressions with
   exactly one group, the number; they are summed over every match in the
