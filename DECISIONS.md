@@ -281,3 +281,6 @@ there. `tools/themis.py` and `install.py` never raise this file, and
 
 - v3.6.0 (2026-10-30): release of the test.docs_quick quick tier, the opt-in documentation budget and the opt-in test tamper tripwire; the optional `tools/themis_review.py` is new, so installed repositories update with `install.py install`, and an owner-owned `themis-gate.yml` needs no change.
 - The three v3.6 features were planned and reviewed by a different model family before they were built, and the built diff was reviewed by that family again.
+
+- v3.6.1 (2026-11-01): the gate runs the test command without the variables git exports to a hook to locate a repository (git's own `git rev-parse --local-env-vars`, as githooks(5) advises for a foreign repository), because a test that ran `git -C <tmp> init` or `config` was redirected to the repository being pushed by the inherited `GIT_DIR`. If git's list cannot be read, the gate fails instead of running the command unisolated. The gate's own git calls keep the inherited variables on purpose. `themis_gate.py` changed, so installed repositories update with `install.py install`; no new file, no rule text changed.
+- The plan and the built diff were each reviewed by a different model family (no findings).
